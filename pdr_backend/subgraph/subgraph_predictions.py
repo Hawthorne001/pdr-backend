@@ -1,13 +1,17 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 import json
-from enum import Enum
 import logging
+from enum import Enum
 from typing import List, TypedDict
 
 from enforce_typing import enforce_types
 
-from pdr_backend.subgraph.prediction import Prediction
+from pdr_backend.lake.prediction import Prediction
 from pdr_backend.subgraph.core_subgraph import query_subgraph
-from pdr_backend.subgraph.info725 import info725_to_info
+from pdr_backend.subgraph.info725 import get_pair_timeframe_source_from_contract
 from pdr_backend.util.networkutil import get_subgraph_url
 from pdr_backend.util.time_types import UnixTimeS
 
@@ -75,7 +79,7 @@ def fetch_filtered_predictions(
 
     query = f"""
         {{
-            predictPredictions(skip: {skip}, first: {first} {where_clause}) {{
+            predictPredictions(skip: {skip}, first: {first} {where_clause}, orderBy: timestamp, orderDirection: asc) {{
                 id
                 timestamp
                 user {{
@@ -101,13 +105,13 @@ def fetch_filtered_predictions(
                                 }}
                             }}
                         }}
+                        secondsPerEpoch
                     }}
                 }}
             }}
         }}"""
 
     try:
-        logger.info("Querying subgraph... %s", query)
         result = query_subgraph(
             get_subgraph_url(network),
             query,
@@ -128,25 +132,20 @@ def fetch_filtered_predictions(
         return []
 
     for prediction_sg_dict in data:
-        info725 = prediction_sg_dict["slot"]["predictContract"]["token"]["nft"][
-            "nftData"
-        ]
-        info = info725_to_info(info725)
-        pair = info["pair"]
-        timeframe = info["timeframe"]
-        source = info["source"]
+        contract = prediction_sg_dict["slot"]["predictContract"]
+        pair, timeframe, source = get_pair_timeframe_source_from_contract(contract)
         timestamp = UnixTimeS(int(prediction_sg_dict["timestamp"]))
         slot = UnixTimeS(int(prediction_sg_dict["slot"]["slot"]))
         user = prediction_sg_dict["user"]["id"]
         address = prediction_sg_dict["id"].split("-")[0]
-        trueval = None
+        truevalue = None
         payout = None
         predicted_value = None
         stake = None
 
         if not prediction_sg_dict["payout"] is None:
             stake = float(prediction_sg_dict["stake"])
-            trueval = prediction_sg_dict["payout"]["trueValue"]
+            truevalue = prediction_sg_dict["payout"]["trueValue"]
             predicted_value = prediction_sg_dict["payout"]["predictedValue"]
             payout = float(prediction_sg_dict["payout"]["payout"])
 
@@ -155,9 +154,9 @@ def fetch_filtered_predictions(
             contract=address,
             pair=pair,
             timeframe=timeframe,
-            prediction=predicted_value,
+            predvalue=predicted_value,
             stake=stake,
-            trueval=trueval,
+            truevalue=truevalue,
             timestamp=timestamp,
             source=source,
             payout=payout,

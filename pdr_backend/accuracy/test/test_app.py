@@ -1,3 +1,7 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 from typing import List
 from unittest.mock import patch
 
@@ -10,7 +14,7 @@ from pdr_backend.accuracy.app import (
     aggregate_statistics,
     calculate_statistics_for_all_assets,
 )
-from pdr_backend.subgraph.subgraph_slot import PredictSlot
+from pdr_backend.subgraph.legacy.subgraph_slot import PredictSlot
 from pdr_backend.util.time_types import UnixTimeS
 
 # Sample data for tests

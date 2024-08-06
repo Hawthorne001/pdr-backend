@@ -1,10 +1,15 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 import logging
 from typing import List
+
 from enforce_typing import enforce_types
 
+from pdr_backend.lake.payout import Payout
 from pdr_backend.subgraph.core_subgraph import query_subgraph
 from pdr_backend.util.networkutil import get_subgraph_url
-from pdr_backend.subgraph.payout import Payout
 from pdr_backend.util.time_types import UnixTimeS
 
 logger = logging.getLogger("subgraph")
@@ -53,12 +58,15 @@ def get_payout_query(
             skip: %s
             where: {
                 or: [%s]
-            }
+            },
+            orderBy: timestamp,
+            orderDirection: asc
         ) {
                 id
                 timestamp
                 payout
                 predictedValue
+                trueValue
                 prediction {
                     stake
                     user {
@@ -72,9 +80,6 @@ def get_payout_query(
                                 name
                             }
                         }
-                        revenue
-                        roundSumStakesUp
-                        roundSumStakes
                     }
                 }
             }
@@ -117,7 +122,6 @@ def fetch_payouts(
     skip: int,
     network: str = "mainnet",
 ) -> List[Payout]:
-
     payouts: List[Payout] = []
 
     query = get_payout_query(
@@ -129,7 +133,6 @@ def fetch_payouts(
     )
 
     try:
-        logger.info("Querying subgraph... %s", query)
         result = query_subgraph(
             get_subgraph_url(network),
             query,
@@ -156,13 +159,9 @@ def fetch_payouts(
                 "token": payout["prediction"]["slot"]["predictContract"]["token"][
                     "name"
                 ],
+                "predvalue": bool(payout["predictedValue"]),
+                "truevalue": bool(payout["trueValue"]),
                 "slot": UnixTimeS(int(payout["id"].split("-")[1])),
-                "predictedValue": bool(payout["predictedValue"]),
-                "revenue": float(payout["prediction"]["slot"]["revenue"]),
-                "roundSumStakesUp": float(
-                    payout["prediction"]["slot"]["roundSumStakesUp"]
-                ),
-                "roundSumStakes": float(payout["prediction"]["slot"]["roundSumStakes"]),
                 "stake": float(payout["prediction"]["stake"]),
             }
         )

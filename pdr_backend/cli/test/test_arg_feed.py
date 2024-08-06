@@ -1,9 +1,11 @@
-import ccxt
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 import pytest
 from enforce_typing import enforce_types
 
 from pdr_backend.cli.arg_feed import ArgFeed
-from pdr_backend.util.mocks import MockExchange
 
 
 @enforce_types
@@ -33,7 +35,7 @@ def test_ArgFeed_main_constructor():
     # not ok - Type Error
     tups = [
         (),
-        ("binance", "open", "BTC/USDT", "", ""),
+        ("binance", "open", "BTC/USDT", "", "", ""),
     ]
     for feed_tup in tups:
         with pytest.raises(TypeError):
@@ -64,10 +66,3 @@ def test_ArgFeed_str():
     target_feed_str = "binance BTC/USDT 5m"
     assert str(ArgFeed("binance", None, "BTC/USDT", "5m")) == target_feed_str
     assert str(ArgFeed("binance", None, "BTC-USDT", "5m")) == target_feed_str
-
-
-def test_ccxt_exchange():
-    feed = ArgFeed("binance", "open", "BTC/USDT")
-    assert isinstance(feed.ccxt_exchange(), ccxt.Exchange)
-    assert isinstance(feed.ccxt_exchange(mock=False), ccxt.Exchange)
-    assert isinstance(feed.ccxt_exchange(mock=True), MockExchange)

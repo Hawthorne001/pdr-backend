@@ -1,5 +1,5 @@
 <!--
-Copyright 2023 Ocean Protocol Foundation
+Copyright 2024 Ocean Protocol Foundation
 SPDX-License-Identifier: Apache-2.0
 -->
 
@@ -45,7 +45,7 @@ Usage: pdr sim|predictoor|trader|..
 
 Main tools:
   pdr sim YAML_FILE
-  pdr predictoor APPROACH YAML_FILE NETWORK
+  pdr predictoor YAML_FILE NETWORK
   pdr trader APPROACH YAML_FILE NETWORK
 ...
 ```
@@ -64,9 +64,11 @@ Main tools:
   - [VPS dev flow](READMEs/vps.md)
   - [Release process](READMEs/release-process.md)
   - [Clean code guidelines](READMEs/clean-code.md)
+  - [Dependency management](READMEs/dependencies.md)
 - [Run dfbuyer bot](READMEs/dfbuyer.md) - runs Predictoor DF rewards
 - [Run publisher](READMEs/publisher.md) - publish new feeds
 - [Run trueval](READMEs/trueval.md) - run trueval bot
+- [Run lake](READMEs/lake-and-etl.md) - run data lake
 
 ## Repo structure
 
@@ -77,27 +79,30 @@ Main bots & user tools:
 - `predictoor` - submit individual predictions
 - `trader` - buy aggregated predictions, then trade
 - `sim` - experiments / simulation flow
+- `payout` - OCEAN & ROSE payout
 
 OPF-run bots & higher-level tools:
 
 - `trueval` - report true values to contract
 - `dfbuyer` - buy feeds on behalf of Predictoor DF
 - `publisher` - publish pdr data feeds
-- `analytics` - analytics tools
-- `payout` - OCEAN & ROSE payout
 - `deployer` - deployer tool
-- `accuracy` - calculates % correct, for display in predictoor.ai webapp
 
 Mid-level building blocks:
 
 - `cli` - implementation of CLI
 - `ppss` - implements settings
+
+Data-level building blocks:
+
+- `ohlcv` - financial data pipeline
 - `aimodel` - AI/ML modeling engine
-- `lake` - data lake and data pipeline
+- `lake` - data lake and analytics tools
 - `subgraph` - blockchain queries, complements lake
+- `accuracy` - to report % correct in webapp
+- `pred_submitter` - for predictoor bots to submit >>1 predictions in 1 tx
 
 Lower-level utilities:
 
-- `contract` - classes to wrap blockchain contracts
-- `models` - simple widely-used data structures
+- `contract` - classes to wrap blockchain contracts; some simple data structures
 - `util` - function-based tools

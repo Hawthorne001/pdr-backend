@@ -1,40 +1,68 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 import argparse
 import logging
 import sys
 from argparse import Namespace
+from typing import List
 
 from enforce_typing import enforce_types
-
 from eth_utils import to_checksum_address
 
 from pdr_backend.cli.nested_arg_parser import NestedArgParser
+from pdr_backend.sim.sim_plotter import SimPlotter
 
 logger = logging.getLogger("cli")
 
-HELP_LONG = """Predictoor tool
-  Transactions are signed with envvar 'PRIVATE_KEY`.
+HELP_TOP = """Predictoor tool
 
 Usage: pdr sim|predictoor|trader|..
+"""
 
+HELP_MAIN = """
 Main tools:
   pdr sim PPSS_FILE
-  pdr predictoor APPROACH PPSS_FILE NETWORK
+  pdr sim_plots [--run_id RUN_ID] [--port PORT] [--debug_mode False]
+  pdr predictoor PPSS_FILE NETWORK
+  pdr dashboard PPSS_FILE NETWORK
   pdr trader APPROACH PPSS_FILE NETWORK
-  pdr lake PPSS_FILE NETWORK
-  pdr analytics PPSS_FILE NETWORK
   pdr claim_OCEAN PPSS_FILE
   pdr claim_ROSE PPSS_FILE
+"""
+
+HELP_HELP = """
+Detailed help:
+  pdr <cmd> -h
+  pdr help_long
+"""
+
+HELP_SIGN = """
+Transactions are signed with envvar 'PRIVATE_KEY`.
+"""
+
+HELP_OTHER_TOOLS = """
+Power tools:
+  pdr multisim PPSS_FILE
+  pdr arima_plots PPSS_FILE [--debug_mode False]
+  pdr deployer (for >1 predictoor bots)
+  pdr ohlcv PPSS_FILE NETWORK
+  pdr lake raw|etl update PPSS_FILE NETWORK
+  pdr lake raw|etl drop PPSS_FILE NETWORK ST_TS
+  pdr lake describe --HTML PPSS_FILE NETWORK
+  pdr lake validate PPSS_FILE NETWORK
+  pdr lake query PPSS_FILE NETWORK SQL_QUERY
 
 Utilities:
-  pdr help
-  pdr <cmd> -h
   pdr get_predictoors_info ST END PQDIR PPSS_FILE NETWORK --PDRS
   pdr get_predictions_info ST END PQDIR PPSS_FILE NETWORK --FEEDS
   pdr get_traction_info ST END PQDIR PPSS_FILE NETWORK --FEEDS
   pdr check_network PPSS_FILE NETWORK --LOOKBACK_HOURS
   pdr create_accounts NUM PPSS_FILE NETWORK
-  pdr view_accounts ACCOUNTS PPSS_FILE NETWORK
+  pdr print_balances ACCOUNT PPSS_FILE NETWORK
   pdr fund_accounts TOKEN_AMOUNT ACCOUNTS PPSS_FILE NETWORK --NATIVE_TOKEN
+  pdr deploy_pred_submitter_mgr PPSS_FILE NETWORK
 
 Tools for core team:
   pdr trueval PPSS_FILE NETWORK
@@ -42,10 +70,11 @@ Tools for core team:
   pdr publisher PPSS_FILE NETWORK
   pdr topup PPSS_FILE NETWORK
   pytest, black, mypy, pylint, ..
-
-To pass args down to ppss, use dot notation.
-Example: pdr lake ppss.yaml sapphire-mainnet --lake_ss.st_timestr=2023-01-01 --lake_ss.fin_timestr=2023-12-31
 """
+
+HELP_SHORT = HELP_TOP + HELP_MAIN + HELP_HELP + HELP_SIGN
+
+HELP_LONG = HELP_TOP + HELP_MAIN + HELP_HELP + HELP_OTHER_TOOLS + HELP_SIGN
 
 
 # ========================================================================
@@ -99,23 +128,43 @@ class NETWORK_Mixin:
 
 
 @enforce_types
-def check_addresses(value):
+def check_addresses(value) -> List[str]:
     """
     @description
-        validates that all addressses is a comma-separated list of strings
-        each string, will be a valid Ethereum address
+        Validates that all addresses is a comma-separated list of strings
+        Each string must be a valid Ethereum address
+
+    @return
+        checksummed list of addresses
     """
     if not value:
         return []
+    addrs = value.split(",")
+    return [check_address(addr) for addr in addrs]
 
-    addresses = value.split(",")
-    checksummed_addresses = []
-    for address in addresses:
-        try:
-            checksummed_addresses.append(to_checksum_address(address.lower()))
-        except Exception as exc:
-            raise TypeError(f"{address} is not a valid Ethereum address") from exc
-    return checksummed_addresses
+
+@enforce_types
+def check_address(addr) -> str:
+    """
+    @description
+        Validates the input address a string, with a valid eth address
+
+    @return
+        checksummed version of the address
+    """
+    try:
+        addr2 = to_checksum_address(addr.lower())
+    except Exception as exc:
+        raise TypeError(f"{addr} is not a valid Ethereum address") from exc
+
+    return addr2
+
+
+def validate_run_id(run_id):
+    if run_id not in SimPlotter.get_all_run_names():
+        raise ValueError(f"Invalid run_id: {run_id}")
+
+    return run_id
 
 
 @enforce_types
@@ -154,6 +203,21 @@ class LOOKBACK_Mixin:
 
 
 @enforce_types
+class DEBUG_Mixin:
+    def add_argument_DEBUG(self):
+        self.add_argument(
+            "--debug_mode",
+            type=bool,
+            help=(
+                "debug_mode defines if app should run or not in debug mode."
+                "If not provided, debug mode will be disabled."
+            ),
+            required=False,
+            default=False,
+        )
+
+
+@enforce_types
 def check_positive(value):
     try:
         ivalue = int(value)
@@ -173,6 +237,16 @@ def check_positive(value):
 class NUM_Mixin:
     def add_argument_NUM(self):
         self.add_argument("NUM", type=check_positive)
+
+
+@enforce_types
+class ACCOUNT_Mixin:
+    def add_argument_ACCOUNT(self):
+        self.add_argument(
+            "ACCOUNT",
+            type=check_address,
+            help="Valid ethereum address",
+        )
 
 
 @enforce_types
@@ -310,16 +384,16 @@ class _ArgParser_NUM_PPSS_NETWORK(
 
 
 @enforce_types
-class _ArgParser_ACCOUNTS_PPSS_NETWORK(
+class _ArgParser_ACCOUNT_PPSS_NETWORK(
     CustomArgParser,
-    ACCOUNTS_Mixin,
+    ACCOUNT_Mixin,
     PPSS_Mixin,
     NETWORK_Mixin,
 ):  # pylint: disable=too-many-ancestors
     @enforce_types
     def __init__(self, description: str, command_name: str):
         super().__init__(description=description)
-        self.add_arguments_bulk(command_name, ["ACCOUNTS", "PPSS", "NETWORK"])
+        self.add_arguments_bulk(command_name, ["ACCOUNT", "PPSS", "NETWORK"])
 
 
 @enforce_types
@@ -334,7 +408,6 @@ class _ArgParser_FUND_ACCOUNTS_PPSS_NETWORK(
     @enforce_types
     def __init__(self, description: str, command_name: str):
         super().__init__(description=description)
-        self.add_argument("command", choices=[command_name])
         self.add_arguments_bulk(
             command_name,
             ["TOKEN_AMOUNT", "ACCOUNTS", "PPSS", "NETWORK", "NATIVE_TOKEN"],
@@ -454,13 +527,19 @@ class _ArgParser_DEPLOYER:
 
 
 @enforce_types
+def do_help_short(status_code=0):
+    print(HELP_SHORT)
+    sys.exit(status_code)
+
+
+@enforce_types
 def do_help_long(status_code=0):
     print(HELP_LONG)
     sys.exit(status_code)
 
 
 @enforce_types
-def print_args(arguments: Namespace):
+def print_args(arguments: Namespace, nested_args: dict):
     arguments_dict = arguments.__dict__
     command = arguments_dict.pop("command", None)
 
@@ -470,31 +549,36 @@ def print_args(arguments: Namespace):
     for arg_k, arg_v in arguments_dict.items():
         logger.info("%s=%s", arg_k, arg_v)
 
+    logger.info("Nested args: %s", nested_args)
 
+
+## below, list *ArgParser classes in same order as HELP_LONG
+
+# main tools
 SimArgParser = _ArgParser_PPSS
-
-PredictoorArgParser = _ArgParser_APPROACH_PPSS_NETWORK
-
+PredictoorArgParser = _ArgParser_PPSS_NETWORK
 TraderArgParser = _ArgParser_APPROACH_PPSS_NETWORK
-
-LakeArgParser = _ArgParser_PPSS_NETWORK
-
 ClaimOceanArgParser = _ArgParser_PPSS
-
 ClaimRoseArgParser = _ArgParser_PPSS
 
+# power tools
+MultisimArgParser = _ArgParser_PPSS
+DeployerArgPaser = _ArgParser_DEPLOYER
+OHLCVArgParser = _ArgParser_PPSS_NETWORK
+LakeArgParser = _ArgParser_PPSS_NETWORK
+
+# utilities
 GetPredictoorsInfoArgParser = _ArgParser_ST_END_PQDIR_NETWORK_PPSS_PDRS
-
 GetPredictionsInfoArgParser = _ArgParser_ST_END_PQDIR_NETWORK_PPSS_FEEDS
-
 GetTractionInfoArgParser = _ArgParser_ST_END_PQDIR_NETWORK_PPSS_FEEDS
-
 CheckNetworkArgParser = _ArgParser_PPSS_NETWORK_LOOKBACK
+CreateAccountsArgParser = _ArgParser_NUM_PPSS_NETWORK
+PrintBalancesArgParser = _ArgParser_ACCOUNT_PPSS_NETWORK
+FundAccountsArgParser = _ArgParser_FUND_ACCOUNTS_PPSS_NETWORK
 
+# Tools for core team
 TruevalArgParser = _ArgParser_PPSS_NETWORK
-
 DfbuyerArgParser = _ArgParser_PPSS_NETWORK
-
 PublisherArgParser = _ArgParser_PPSS_NETWORK
 
 
@@ -504,22 +588,80 @@ class TopupArgParser(_ArgParser_PPSS_NETWORK):
         return ["sapphire-testnet", "sapphire-mainnet"]
 
 
-CreateAccountsArgParser = _ArgParser_NUM_PPSS_NETWORK
+class SimPlotsArgParser(CustomArgParser):
+    # pylint: disable=unused-argument
+    def __init__(self, description: str, command_name: str):
+        super().__init__(description=description)
 
-AccountsArgParser = _ArgParser_ACCOUNTS_PPSS_NETWORK
+        self.add_argument(
+            "--debug_mode",
+            help=(
+                "debug_mode defines if app should run or not in debug mode."
+                "If not provided, debug mode will be disabled."
+            ),
+            type=bool,
+            default=False,
+        )
 
-FundAccountsArgParser = _ArgParser_FUND_ACCOUNTS_PPSS_NETWORK
+        self.add_argument(
+            "--run_id",
+            help=(
+                "The run_id of the simulation to visualize. "
+                "If not provided, the latest run_id will be used."
+            ),
+            type=validate_run_id,
+        )
 
-DeployerArgPaser = _ArgParser_DEPLOYER
+        self.add_argument(
+            "--port",
+            nargs="?",
+            help="The port to run the server on. Default is 8050.",
+            type=int,
+            default=8050,
+        )
 
+
+class ArimaPlotsArgParser(CustomArgParser, PPSS_Mixin, DEBUG_Mixin):
+    # pylint: disable=unused-argument
+    def __init__(self, description: str, command_name: str):
+        super().__init__(description=description)
+
+        self.add_arguments_bulk(
+            command_name,
+            ["PPSS", "DEBUG"],
+        )
+
+
+class PredictoorDashboardArgParser(
+    CustomArgParser, PPSS_Mixin, NETWORK_Mixin, DEBUG_Mixin
+):
+    # pylint: disable=unused-argument
+    def __init__(self, description: str, command_name: str):
+        super().__init__(description=description)
+
+        self.add_arguments_bulk(
+            command_name,
+            ["PPSS", "NETWORK", "DEBUG"],
+        )
+
+
+# below, list each entry in defined_parsers in same order as HELP_LONG
 defined_parsers = {
+    # main tools
     "do_sim": SimArgParser("Run simulation", "sim"),
     "do_predictoor": PredictoorArgParser("Run a predictoor bot", "predictoor"),
     "do_trader": TraderArgParser("Run a trader bot", "trader"),
-    "do_lake": LakeArgParser("Run the lake tool", "lake"),
-    "do_analytics": LakeArgParser("Run the analytics tool", "analytics"),
     "do_claim_OCEAN": ClaimOceanArgParser("Claim OCEAN", "claim_OCEAN"),
     "do_claim_ROSE": ClaimRoseArgParser("Claim ROSE", "claim_ROSE"),
+    # power tools
+    "do_multisim": MultisimArgParser("Run >1 simulations", "multisim"),
+    "do_deployer": DeployerArgPaser(),
+    "do_lake": LakeArgParser("Run the lake tool", "lake"),
+    "do_ohlcv": OHLCVArgParser("Run the ohlcv tool", "ohlcv"),
+    "do_deploy_pred_submitter_mgr": _ArgParser_PPSS_NETWORK(
+        "Deploy prediction submitter manager contract", "deploy_pred_submitter_mgr"
+    ),
+    # utilities
     "do_get_predictoors_info": GetPredictoorsInfoArgParser(
         "For specified predictoors, report {accuracy, ..} of each predictoor",
         "get_predictoors_info",
@@ -533,20 +675,25 @@ defined_parsers = {
         "get_traction_info",
     ),
     "do_check_network": CheckNetworkArgParser("Check network", "check_network"),
-    "do_trueval": TruevalArgParser("Run trueval bot", "trueval"),
-    "do_dfbuyer": DfbuyerArgParser("Run dfbuyer bot", "dfbuyer"),
-    "do_publisher": PublisherArgParser("Publish feeds", "publisher"),
-    "do_topup": TopupArgParser("Topup OCEAN and ROSE in dfbuyer, trueval, ..", "topup"),
     "do_create_accounts": CreateAccountsArgParser(
         "Create multiple accounts..", "create_accounts"
     ),
-    "do_view_accounts": AccountsArgParser(
-        "View balances from 1 or more accounts", "view_accounts"
+    "do_print_balances": PrintBalancesArgParser(
+        "View balances of an account", "print_balances"
     ),
     "do_fund_accounts": FundAccountsArgParser(
         "Fund multiple wallets from a single address", "fund_accounts"
     ),
-    "do_deployer": DeployerArgPaser(),
+    # tools for core team
+    "do_trueval": TruevalArgParser("Run trueval bot", "trueval"),
+    "do_dfbuyer": DfbuyerArgParser("Run dfbuyer bot", "dfbuyer"),
+    "do_publisher": PublisherArgParser("Publish feeds", "publisher"),
+    "do_topup": TopupArgParser("Topup OCEAN and ROSE in dfbuyer, trueval, ..", "topup"),
+    "do_sim_plots": SimPlotsArgParser("Visualize simulation data", "sim_plots"),
+    "do_arima_plots": ArimaPlotsArgParser("Visualize ARIMA data", "arima_plots"),
+    "do_dashboard": PredictoorDashboardArgParser(
+        "Visualize Predictoor data", "dashboard"
+    ),
 }
 
 

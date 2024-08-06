@@ -1,7 +1,12 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
+from datetime import datetime, UTC
 from unittest.mock import Mock, patch
 
 from enforce_typing import enforce_types
-from freezegun import freeze_time
+import time_machine
 
 from pdr_backend.analytics.check_network import (
     _N_FEEDS,
@@ -14,7 +19,9 @@ from pdr_backend.util.constants import S_PER_DAY, S_PER_WEEK
 from pdr_backend.util.currency_types import Eth, Wei
 
 PATH = "pdr_backend.analytics.check_network"
-MOCK_CUR_UT = 1702826080
+
+MOCK_DT = datetime(2023, 12, 17, 15, 14, 40, tzinfo=UTC)
+MOCK_CUR_UT = int(MOCK_DT.timestamp())  # 1702826080
 
 
 @enforce_types
@@ -26,7 +33,7 @@ MOCK_CUR_UT = 1702826080
     f"{PATH}.get_expected_consume",
     side_effect=Mock(return_value=100),
 )
-@freeze_time("2023-12-17 15:14:40")  # corresponds to MOCK_CUR_UT
+@time_machine.travel(MOCK_DT)
 def test_check_dfbuyer(  # pylint: disable=unused-argument
     mock_get_expected_consume_,
     mock_get_consume_so_far_per_contract_,
@@ -35,7 +42,7 @@ def test_check_dfbuyer(  # pylint: disable=unused-argument
     dfbuyer_addr = "0x1"
     contract_query_result = {"data": {"predictContracts": [{"id": "0x1"}]}}
     subgraph_url = "test_dfbuyer"
-    token_amt = 3
+    token_amt = 3.0
     check_dfbuyer(dfbuyer_addr, contract_query_result, subgraph_url, token_amt)
 
     target_str = (
@@ -45,7 +52,7 @@ def test_check_dfbuyer(  # pylint: disable=unused-argument
     assert "got 120 consume for contract: 0x1, expected 100" in caplog.text
 
     cur_ut = MOCK_CUR_UT
-    start_ut = int((cur_ut // S_PER_WEEK) * S_PER_WEEK)
+    start_ut = int((cur_ut // S_PER_WEEK) * S_PER_WEEK) - 3 * 60 * 60
     mock_get_consume_so_far_per_contract_.assert_called_once_with(
         subgraph_url, dfbuyer_addr, start_ut, ["0x1"]
     )
@@ -56,7 +63,7 @@ def test_check_dfbuyer(  # pylint: disable=unused-argument
 def test_get_expected_consume():
     # Test case 1: Beginning of week
     for_ut = S_PER_WEEK  # Start of second week
-    token_amt = 140
+    token_amt = 140.0
     expected = token_amt / 7 / _N_FEEDS  # Expected consume for one interval
     assert get_expected_consume(for_ut, token_amt) == expected
 
@@ -89,7 +96,11 @@ def test_check_network_main(  # pylint: disable=unused-argument
     tmpdir,
     monkeypatch,
 ):
-    ppss = mock_ppss(["binance BTC/USDT c 5m"], "sapphire-mainnet", str(tmpdir))
+    ppss = mock_ppss(
+        [{"predict": "binance BTC/USDT c 5m", "train_on": "binance BTC/USDT c 5m"}],
+        "sapphire-mainnet",
+        str(tmpdir),
+    )
 
     mock_get_opf_addresses.return_value = {
         "dfbuyer": "0xdfBuyerAddress",
@@ -99,8 +110,9 @@ def test_check_network_main(  # pylint: disable=unused-argument
     mock_token.return_value.balanceOf.return_value = Eth(1000).to_wei()
 
     mock_w3 = Mock()  # pylint: disable=not-callable
-    mock_w3.eth.get_balance.return_value = Eth(1000).to_wei()
+    mock_w3.eth.get_balance.return_value = 1000.0 * 1e18
     ppss.web3_pp.web3_config.w3 = mock_w3
+    ppss.web3_pp.w3.eth.block_number = 100
     check_network_main(ppss, lookback_hours=24)
 
     mock_get_opf_addresses.assert_called_once_with("sapphire-mainnet")
@@ -120,7 +132,11 @@ def test_check_network_others(  # pylint: disable=unused-argument
     tmpdir,
     monkeypatch,
 ):
-    ppss = mock_ppss(["binance BTC/USDT c 5m"], "sapphire-mainnet", str(tmpdir))
+    ppss = mock_ppss(
+        [{"predict": "binance BTC/USDT c 5m", "train_on": "binance BTC/USDT c 5m"}],
+        "sapphire-mainnet",
+        str(tmpdir),
+    )
     mock_query_subgraph = Mock()
 
     # test if predictoor contracts are found, iterates through them
@@ -158,7 +174,11 @@ def test_check_network_without_mock(  # pylint: disable=unused-argument
     monkeypatch,
 ):
     mock_token.balanceOf.return_value = Wei(1000e18)
-    ppss = mock_ppss(["binance BTC/USDT c 5m"], "sapphire-mainnet", str(tmpdir))
+    ppss = mock_ppss(
+        [{"predict": "binance BTC/USDT c 5m", "train_on": "binance BTC/USDT c 5m"}],
+        "sapphire-mainnet",
+        str(tmpdir),
+    )
 
     check_network_main(ppss, lookback_hours=1)
     assert mock_check_dfbuyer.call_count == 1

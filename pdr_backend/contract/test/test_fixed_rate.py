@@ -1,3 +1,7 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 from enforce_typing import enforce_types
 from pytest import approx
 
@@ -6,8 +10,8 @@ from pdr_backend.util.currency_types import Eth, Wei
 
 
 @enforce_types
-def test_FixedRate(predictoor_contract, web3_pp):
-    exchanges = predictoor_contract.get_exchanges()
+def test_FixedRate(feed_contract1, web3_pp):
+    exchanges = feed_contract1.get_exchanges()
     print(exchanges)
 
     address = exchanges[0][0]

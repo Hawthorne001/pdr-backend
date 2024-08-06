@@ -1,5 +1,5 @@
 <!--
-Copyright 2023 Ocean Protocol Foundation
+Copyright 2024 Ocean Protocol Foundation
 SPDX-License-Identifier: Apache-2.0
 -->
 
@@ -14,6 +14,7 @@ This README shows how to earn $ by running a predictoor bot on mainnet.
 1. **[Run bot on testnet](#3-run-predictoor-bot-on-sapphire-testnet)**
 1. **[Run bot on mainnet](#4-run-predictoor-bot-on-sapphire-mainnet)**
 1. **[Claim payout](#5-claim-payout)**
+1. **[Run dashboard to monitor and analyze performance](#6-run-dashboard)**
 
 Once you're done the main flow, you can go beyond, with any of:
 
@@ -24,6 +25,10 @@ Once you're done the main flow, you can go beyond, with any of:
 
 ## 1. Install pdr-backend Repo
 
+Prerequisites:
+- Python 3.12. Earlier _will_ fail, e.g. can't find `UTC`. [Details](https://blog.miguelgrinberg.com/post/it-s-time-for-a-change-datetime-utcnow-is-now-deprecated)
+- Ubuntu MacOS. _Not_ Windows.
+
 In a new console:
 
 ```console
@@ -31,21 +36,34 @@ In a new console:
 git clone https://github.com/oceanprotocol/pdr-backend
 cd pdr-backend
 
-# Create & activate virtualenv
+# create & activate virtualenv
 python -m venv venv
 source venv/bin/activate
 
-# Install modules in the environment
+# install modules in the environment
 pip install -r requirements.txt
 
-#add pwd to bash path
+# add pwd to bash path
 export PATH=$PATH:.
+```
+
+You need a local copy of Ocean contract addresses [`address.json`](https://github.com/oceanprotocol/contracts/blob/main/addresses/address.json). In console:
+```console
+# make directory if needed
+mkdir -p ~/.ocean; mkdir -p ~/.ocean/ocean-contracts; mkdir -p ~/.ocean/ocean-contracts/artifacts/
+
+# copy from github to local directory. Or, use wget if Linux. Or, download via browser.
+curl https://raw.githubusercontent.com/oceanprotocol/contracts/main/addresses/address.json -o ~/.ocean/ocean-contracts/artifacts/address.json
 ```
 
 If you're running MacOS, then in console:
 
 ```console
+# so that sapphire.py works. Details in #66
 codesign --force --deep --sign - venv/sapphirepy_bin/sapphirewrapper-arm64.dylib
+
+# so that xgboost works. Details in #1339
+brew install libomp
 ```
 
 ## 2. Simulate Modeling and Trading
@@ -58,22 +76,32 @@ Copy [`ppss.yaml`](../ppss.yaml) into your own file `my_ppss.yaml` and change pa
 cp ppss.yaml my_ppss.yaml
 ```
 
-Let's simulate! In console:
-
+Let's run the simulation engine. In console:
 ```console
 pdr sim my_ppss.yaml
 ```
 
-What it does:
-
+What the engine does does:
 1. Set simulation parameters.
-1. Grab historical price data from exchanges and stores in `parquet_data/` dir. It re-uses any previously saved data.
+1. Grab historical price data from exchanges and stores in `lake_data/` dir. It re-uses any previously saved data.
 1. Run through many 5min epochs. At each epoch:
    - Build a model
    - Predict
    - Trade
-   - Plot profit versus time, more
    - Log to console and `logs/out_<time>.txt`
+   - For plots, output state to `sim_state/`
+
+Let's visualize results. Open a separate console, and:
+```console
+cd ~/code/pdr-backend # or wherever your pdr-backend dir is
+source venv/bin/activate
+export PATH=$PATH:.
+
+# start the plots server
+pdr sim_plots
+```
+
+The plots server will give a url, such as [http://127.0.0.1:8050](http://127.0.0.1:8050). Open that url in your browser to see plots update in real time.
 
 "Predict" actions are _two-sided_: it does one "up" prediction tx, and one "down" tx, with more stake to the higher-confidence direction. Two-sided is more profitable than one-sided prediction.
 
@@ -85,29 +113,61 @@ To see simulation CLI options: `pdr sim -h`.
 
 Simulation uses Python [logging](https://docs.python.org/3/howto/logging.html) framework. Configure it via [`logging.yaml`](../logging.yaml). [Here's](https://medium.com/@cyberdud3/a-step-by-step-guide-to-configuring-python-logging-with-yaml-files-914baea5a0e5) a tutorial on yaml settings.
 
+By default, Dash plots the latest sim (even if it is still running). To enable plotting for a specific run, e.g. if you used multisim or manually triggered different simulations, the sim engine assigns unique ids to each run.
+Select that unique id from the `sim_state` folder, and run `pdr sim_plots --run_id <unique_id>` e.g. `pdr sim_plots --run-id 97f9633c-a78c-4865-9cc6-b5152c9500a3`
+
+You can run many instances of Dash at once, with different URLs. To run on different ports, use the `--port` argument.
+
 ## 3. Run Predictoor Bot on Sapphire Testnet
 
 Predictoor contracts run on [Oasis Sapphire](https://docs.oasis.io/dapp/sapphire/) testnet and mainnet. Sapphire is a privacy-preserving EVM-compatible L1 chain.
 
 Let's get our predictoor bot running on testnet first.
 
-The bot does two-sided predictions, like in simulation. This also means it needs two Ethereum accounts, with keys PRIVATE_KEY and PRIVATE_KEY2.
+The bot does two-sided predictions, like in simulation.
 
 First, tokens! You need (fake) ROSE to pay for gas, and (fake) OCEAN to stake and earn, for both accounts. [Get them here](testnet-faucet.md).
 
 Then, copy & paste your private keys as envvars. In console:
 
 ```console
-export PRIVATE_KEY=<YOUR_PRIVATE_KEY 1>
-export PRIVATE_KEY2=<YOUR_PRIVATE_KEY 2>
+export PRIVATE_KEY=<YOUR_PRIVATE_KEY>
 ```
 
-Update `my_ppss.yaml` as desired.
+### Deploy the Prediction Submitter Manager
+
+Copy [`ppss.yaml`](../ppss.yaml) into your own file `my_ppss.yaml`.
+
+```console
+cp ppss.yaml my_ppss.yaml
+```
+
+Prediction submitter manager is a smart contract that can submit predictions for multiple pairs and both sides in a single transaction. Predictoor agent uses this smart contract to submit predictions and it must be deployed first. To deploy the contract, run:
+
+```
+pdr deploy_pred_submitter_mgr my_ppss.yaml sapphire-testnet
+```
+
+#### Update YAML config with the contract address
+
+Next, update `my_ppss.yaml` and input the contract address in place of `predictoor_ss.bot_only.pred_submitter_mgr`:
+
+```
+predictoor_ss:
+  ...
+  bot_only:
+    pred_submitter_mgr: "CONTRACT_ADDRESS"
+  ...
+```
+
+Update the rest of the config as desired.
+
+### Running the bot
 
 Then, run a bot with modeling-on-the fly (approach 2). In console:
 
 ```console
-pdr predictoor 2 my_ppss.yaml sapphire-testnet
+pdr predictoor my_ppss.yaml sapphire-testnet
 ```
 
 Your bot is running, congrats! Sit back and watch it in action. It will loop continuously.
@@ -135,16 +195,15 @@ First, real tokens! Get [ROSE via this guide](get-rose-on-sapphire.md) and [OCEA
 Then, copy & paste your private keys as envvars. (You can skip this if keys are same as testnet.) In console:
 
 ```console
-export PRIVATE_KEY=<YOUR_PRIVATE_KEY 1>
-export PRIVATE_KEY2=<YOUR_PRIVATE_KEY 2>
+export PRIVATE_KEY=<YOUR_PRIVATE_KEY>
 ```
 
-Update `my_ppss.yaml` as desired.
+Follow the same steps in [Deploy the Prediction Submitter Manager](#deploy-the-prediction-submitter-manager) and make sure to update `pred_submitter_mgr` in the `my_ppss.yaml` config, update the rest of it as desired.
 
 Then, run the bot. In console:
 
 ```console
-pdr predictoor 2 my_ppss.yaml sapphire-mainnet
+pdr predictoor my_ppss.yaml sapphire-mainnet
 ```
 
 This is where there's real $ at stake. Good luck!
@@ -159,14 +218,60 @@ When running predictoors on mainnet, you have the potential to earn $.
 
 Congrats! You've gone through all the essential steps to earn $ by running a predictoor bot on mainnet.
 
+## 6. Run Dashboard
+
+After running your predictor bot, you may **monitor and analyze its performance**.
+
+To assist with this, pdr_backend provides a dashboard that utilizes **live blockchain data** to visualize key performance metrics such as **accuracy, profit, and costs over a specific period**.
+
+Please refer to this **[setup guide](predictoor-dashboard.md)** for detailed instructions on how to set up, configure, and **run the dashboard** to visualize real-time data from the blockchain.
+
 The next sections describe how to go beyond, by optimizing the model and more.
 
 # Optimize model
 
-The idea: make your own model, tuned for accuracy, which in turn will optimize it for $. Here's how:
+You can tune your data & model for accuracy, which in turn will optimize it for $. And you can write your own code too, to push performance further. This section covers both.
 
+## Optimize model: Tuning
+Top-level tuning flow:
+1. Use `multisim` tool to find optimal parameters, via simulation runs
+1. Bring your model as a Predictoor bot to testnet then mainnet.
+
+**Detailed tuning flow.** First, specify your sweep parameters & respective values in `my_ppss.yaml`, section `multisim_ss`. Here's an example.
+```yaml
+multisim_ss:
+  approach: SimpleSweep # SimpleSweep | FastSweep (future) | ..
+  sweep_params:
+  - trader_ss.buy_amt: 1000 USD, 2000 USD
+  - predictoor_ss.aimodel_ss.max_n_train: 500, 1000, 1500
+  - predictoor_ss.aimodel_ss.input_feeds:
+    -
+      - binance BTC/USDT c 5m
+    -
+      - binance BTC/USDT ETH/USDT c 5m
+      - kraken BTC/USDT c 5m
+```
+
+In the example, three parameters are being swept:
+1. `trader_ss.buy_amt`, with two possible values: (i) `1000 USD` or (ii) `2000 USD`
+1. `predictoor_ss.aimodel_ss.max_n_train`, with three possible values: (i) `500`, (ii) `1000`, or (iii) `1500`
+1. `predictoor_ss.aimodel_ss.input_feeds`, with two possible values: (i) just binance BTC/USDT close price, or (ii) binance BTC/USDT & ETH/USDT close price, and kraken BTC/USDT close price.
+
+The total number of combinations is 2 x 3 x 2 = 12.
+
+Then, run `pdr multisim PPSS_FILE`.
+
+The multisim tool will run a separate simulation for each of the 12 combinations.
+
+As it runs, it will update a csv file summarizing results, as follows.
+- name is `multisim_metrics_UNIX-TIME-MS.csv`, where UNIX-TIME-MS is the unix time at the start of the multisim run, in milliseconds.
+- The columns of the csv are: run_number, performance metric 1, performance metric 2, ..., ppss setup parameter 1, setup parameter 2, ... .
+  - Performance metrics are currently: "acc_est" (model prediction accuracy at end), "acc_l" (lower-bound accuracy), "acc_u" (upper-bound accuracy), "f1", "precision", "recall".
+- The first row of the csv is the header. Each subsequent row is the results for a given run. For the example above, there will be 1+12 rows.
+
+**Go further: write code.** You can go beyond tuning parameters, by developing your own data or modeling. Here's how:
 1. Fork `pdr-backend` repo.
-1. Change predictoor approach 2 modeling code as you wish, while iterating with simulation.
+1. Change code for data, modeling, or otherwise as you wish. Run multisim to tune further
 1. Bring your model as a Predictoor bot to testnet then mainnet.
 
 # Right-size staking

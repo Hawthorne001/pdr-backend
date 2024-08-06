@@ -1,5 +1,10 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 import logging
 import os
+from typing import Optional
 
 import numpy as np
 from enforce_typing import enforce_types
@@ -18,13 +23,13 @@ class LakeSS(MultiFeedMixin):
         # yaml_dict["lake_ss"]
         super().__init__(d, assert_feed_attributes=["timeframe"])
 
-        # handle parquet_dir
-        assert self.parquet_dir == os.path.abspath(self.parquet_dir)
-        if not os.path.exists(self.parquet_dir):
+        # handle lake_dir
+        assert self.lake_dir == os.path.abspath(self.lake_dir)
+        if not os.path.exists(self.lake_dir):
             logger.warning(
-                "Could not find parquet dir, creating one at: %s", self.parquet_dir
+                "Could not find lake dir, creating one at: %s", self.lake_dir
             )
-            os.makedirs(self.parquet_dir)
+            os.makedirs(self.lake_dir)
 
         # test inputs
         assert (
@@ -37,8 +42,8 @@ class LakeSS(MultiFeedMixin):
     # --------------------------------
     # yaml properties
     @property
-    def parquet_dir(self) -> str:
-        s = self.d["parquet_dir"]
+    def lake_dir(self) -> str:
+        s = self.d["lake_dir"]
         if s != os.path.abspath(s):  # rel path given; needs an abs path
             return os.path.abspath(s)
         # abs path given
@@ -51,6 +56,10 @@ class LakeSS(MultiFeedMixin):
     @property
     def fin_timestr(self) -> str:
         return self.d["fin_timestr"]  # eg "now","2023-09-23_17:55","2023-09-23"
+
+    @property
+    def api(self) -> str:
+        return self.d.get("api", "ccxt")
 
     # feeds defined in base
 
@@ -84,6 +93,29 @@ class LakeSS(MultiFeedMixin):
         s += f"fin_timestr={self.fin_timestr}"
         s += f" -> fin_timestamp={self.fin_timestamp.pretty_timestr()}\n"
         s += f" -> n_exchs={self.n_exchs}\n"
-        s += f"parquet_dir={self.parquet_dir}\n"
+        s += f"lake_dir={self.lake_dir}\n"
         s += "-" * 10 + "\n"
         return s
+
+
+# =========================================================================
+# utilities for testing
+
+
+@enforce_types
+def lake_ss_test_dict(
+    lake_dir: str,
+    feeds: Optional[list] = None,
+    st_timestr: Optional[str] = None,
+    fin_timestr: Optional[str] = None,
+    timeframe: Optional[str] = None,
+):
+    """Use this function's return dict 'd' to construct LakeSS(d)"""
+    d = {
+        "feeds": feeds or ["binance BTC/USDT c 5m"],
+        "lake_dir": lake_dir,
+        "st_timestr": st_timestr or "2023-06-18",
+        "fin_timestr": fin_timestr or "2023-06-30",
+        "timeframe": timeframe or "5m",
+    }
+    return d

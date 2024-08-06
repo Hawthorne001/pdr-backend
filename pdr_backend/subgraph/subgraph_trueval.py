@@ -1,10 +1,15 @@
-from typing import List
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 import logging
+from typing import List
+
 from enforce_typing import enforce_types
 
+from pdr_backend.lake.trueval import Trueval
 from pdr_backend.subgraph.core_subgraph import query_subgraph
 from pdr_backend.util.networkutil import get_subgraph_url
-from pdr_backend.subgraph.trueval import Trueval
 from pdr_backend.util.time_types import UnixTimeS
 
 logger = logging.getLogger("trueval")
@@ -39,7 +44,9 @@ def get_truevals_query(
             predictTrueVals (
                 first: %s
                 skip: %s
-                where: { timestamp_gte: %s, timestamp_lte: %s, slot_: {predictContract_in: %s}}
+                where: { timestamp_gte: %s, timestamp_lte: %s, slot_: {predictContract_in: %s}},
+                orderBy: timestamp,
+                orderDirection: asc
             ) {
                 id
                 timestamp
@@ -51,6 +58,9 @@ def get_truevals_query(
                             name
                         }
                     }
+                    revenue
+                    roundSumStakesUp
+                    roundSumStakes
                 }
             }
         }
@@ -87,7 +97,6 @@ def fetch_truevals(
     )
 
     try:
-        logger.info("Querying subgraph... %s", query)
         result = query_subgraph(
             get_subgraph_url(network),
             query,
@@ -113,13 +122,19 @@ def fetch_truevals(
         ID = record["id"]
         token = record["slot"]["predictContract"]["token"]["name"]
         slot = UnixTimeS(int(record["id"].split("-")[1]))
+        revenue = float(record["slot"].get("revenue", 0))
+        roundSumStakesUp = float(record["slot"].get("roundSumStakesUp", 0))
+        roundSumStakes = float(record["slot"].get("roundSumStakes", 0))
 
         trueval = Trueval(
             ID=ID,
             token=token,
             timestamp=timestamp,
-            trueval=truevalue,
+            truevalue=truevalue,
             slot=slot,
+            revenue=revenue,
+            roundSumStakesUp=roundSumStakesUp,
+            roundSumStakes=roundSumStakes,
         )
 
         truevals.append(trueval)

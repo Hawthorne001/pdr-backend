@@ -1,4 +1,10 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 import inspect
+from itertools import groupby
+from typing import List, Union
 
 from enforce_typing import enforce_types
 
@@ -9,8 +15,8 @@ class StrMixin:
         class_name = self.__class__.__name__
 
         newline = False
-        if hasattr(self, "__STR_GIVES_NEWLinearLogisticE__"):
-            newline = self.__STR_GIVES_NEWLinearLogisticE__  # type: ignore
+        if hasattr(self, "__STR_GIVES_NEWClassifLinearRidgeE__"):
+            newline = self.__STR_GIVES_NEWClassifLinearRidgeE__  # type: ignore
 
         s = []
         s += [f"{class_name}={{"]
@@ -73,6 +79,7 @@ def dictStr(d: dict, newline=False) -> str:
     return "".join(s)
 
 
+@enforce_types
 def prettyBigNum(amount, remove_zeroes: bool = True) -> str:
     """Prints, for example:
     1.23e12, 123.4B, 1.23B, 123M, 1.23M, 123K, 1.23K, 123,
@@ -114,3 +121,43 @@ def prettyBigNum(amount, remove_zeroes: bool = True) -> str:
         s = "-" + s
 
     return s
+
+
+@enforce_types
+def compactSmallNum(x: Union[float, int]) -> str:
+    """
+    @description
+      Prints numbers with two decimal places precision,
+      using e-notation for small numbers if needed.
+      Removes unneeded zeroes.
+    """
+    if x == 0:
+        return "0"
+
+    if abs(x) >= 0.01:
+        return f"{x:6.2f}".strip()
+
+    s = f"{x:6.2e}"
+    s = s.replace("e-0", "e-")
+
+    return s
+
+
+@enforce_types
+def shift_one_earlier(s: str) -> str:
+    """eg 'binance:BTC/USDT:close:z(t-3)' -> 'binance:BTC/USDT:close:z(t-2)'"""
+    new_s = ""
+    for word in separate_string_number(s):
+        if word.isnumeric():
+            word = str(int(word) - 1)
+        new_s += word
+    return new_s
+
+
+@enforce_types
+def separate_string_number(s: str) -> List[str]:
+    """
+    eg '10in!20ft10400:bg' -> ['10', 'in!', '20', 'ft', '10400', ':bg']
+    Ref: https://stackoverflow.com/a/68346827
+    """
+    return ["".join(g) for _, g in groupby(s, key=str.isdigit)]

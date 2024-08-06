@@ -1,3 +1,7 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 import re
 from typing import List, Optional, Tuple, Union
 
@@ -36,12 +40,12 @@ class ArgPair:
 
             base_str, quote_str = _unpack_pair_str(pair_str)
 
-        _verify_base_str(base_str)
-        _verify_quote_str(quote_str)
+        verify_base_str(base_str)
+        verify_quote_str(quote_str)
 
-        self.pair_str = pair_str
-        self.base_str = base_str
-        self.quote_str = quote_str
+        self.pair_str: str = pair_str  # type: ignore[assignment]
+        self.base_str: str = base_str  # type: ignore[assignment]
+        self.quote_str: str = quote_str  # type: ignore[assignment]
 
     def __eq__(self, other):
         return self.pair_str == str(other)
@@ -53,6 +57,7 @@ class ArgPair:
         return hash(self.pair_str)
 
 
+# don't use @enforce_types, causes problems
 class ArgPairs(List[ArgPair]):
     def __init__(self, pairs: Union[List[str], List[ArgPair]]):
         if not isinstance(pairs, list):
@@ -108,6 +113,7 @@ def _unpack_pairs_str(pairs_str: str) -> List[str]:
     return pair_str_list
 
 
+@enforce_types
 def _unpack_pair_str(pair_str: str) -> Tuple[str, str]:
     """
     @description
@@ -130,7 +136,19 @@ def _unpack_pair_str(pair_str: str) -> Tuple[str, str]:
 
 
 @enforce_types
-def _verify_base_str(base_str: str):
+def verify_pair_str(pair_str: str):
+    """Raise an error if the input string is invalid"""
+    _ = ArgPair(pair_str=pair_str)
+
+
+@enforce_types
+def verify_pairs_str(pairs_str: str):
+    """Raise an error if the input string is invalid"""
+    _ = ArgPairs.from_str(pairs_str=pairs_str)
+
+
+@enforce_types
+def verify_base_str(base_str: str):
     """
     @description
       Raise an error if base_str is invalid
@@ -144,7 +162,7 @@ def _verify_base_str(base_str: str):
 
 
 @enforce_types
-def _verify_quote_str(quote_str: str):
+def verify_quote_str(quote_str: str):
     """
     @description
       Raise an error if quote_str is invalid

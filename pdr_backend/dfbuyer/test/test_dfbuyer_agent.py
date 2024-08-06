@@ -1,3 +1,7 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -102,7 +106,7 @@ def test_dfbuyer_agent_get_consume_so_far(mock_get_consume_so_far, mock_dfbuyer_
 
 
 @enforce_types
-@patch(f"{PATH}.PredictoorContract")
+@patch(f"{PATH}.FeedContract")
 def test_dfbuyer_agent_get_prices(mock_contract, mock_dfbuyer_agent):
     mock_contract_instance = MagicMock()
     mock_contract.return_value = mock_contract_instance

@@ -1,3 +1,7 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 import numpy as np
 from enforce_typing import enforce_types
 
@@ -13,7 +17,7 @@ from pdr_backend.lake.constants import (
 
 
 @enforce_types
-def test_constants():
+def test_lake_constants():
     assert len(OHLCV_COLS) == len(OHLCV_DTYPES)
     assert len(TOHLCV_COLS) == len(TOHLCV_DTYPES) == len(OHLCV_COLS) + 1
 

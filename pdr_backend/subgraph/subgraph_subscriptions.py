@@ -1,16 +1,17 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 import json
-import logging
 from typing import List
 
 from enforce_typing import enforce_types
 
-from pdr_backend.subgraph.subscription import Subscription
+from pdr_backend.lake.subscription import Subscription
 from pdr_backend.subgraph.core_subgraph import query_subgraph
-from pdr_backend.subgraph.info725 import info725_to_info
+from pdr_backend.subgraph.info725 import get_pair_timeframe_source_from_contract
 from pdr_backend.util.networkutil import get_subgraph_url
 from pdr_backend.util.time_types import UnixTimeS
-
-logger = logging.getLogger("subgraph")
 
 
 @enforce_types
@@ -61,7 +62,8 @@ def fetch_filtered_subscriptions(
     # pylint: disable=line-too-long
     query = f"""
         {{
-            predictSubscriptions(skip: {skip}, first: {first} {where_clause}) {{
+            predictSubscriptions(skip: {skip}, first: {first} {where_clause}, orderBy: timestamp,
+            orderDirection: asc) {{
                 id
                 txId
                 timestamp
@@ -81,11 +83,11 @@ def fetch_filtered_subscriptions(
                             }}
                         }}
                     }}
+                    secondsPerEpoch
                 }}
             }}
         }}"""
 
-    logger.info("Querying subgraph... %s", query)
     result = query_subgraph(
         get_subgraph_url(network),
         query,
@@ -100,17 +102,12 @@ def fetch_filtered_subscriptions(
         return []
 
     for subscription_sg_dict in data:
-        info725 = subscription_sg_dict["predictContract"]["token"]["nft"]["nftData"]
-        info = info725_to_info(info725)
-        pair = info["pair"]
-        timeframe = info["timeframe"]
-        source = info["source"]
+        contract = subscription_sg_dict["predictContract"]
+        pair, timeframe, source = get_pair_timeframe_source_from_contract(contract)
         timestamp = UnixTimeS(int(subscription_sg_dict["timestamp"]))
         tx_id = subscription_sg_dict["txId"]
-        last_price_value = (
-            float(subscription_sg_dict["predictContract"]["token"]["lastPriceValue"])
-            * 1.201
-        )
+        # hardcoding price to 3 as a temporary solution because FRE data is missing in subgraph and the price doesn't change for now
+        last_price_value = 3.0
 
         user = subscription_sg_dict["user"]["id"]
 

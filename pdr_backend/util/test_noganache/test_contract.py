@@ -1,3 +1,7 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 from pathlib import Path
 
 import pytest
@@ -21,7 +25,10 @@ _NETWORKS = [
 def test_contract_main(network):
     # setup
 
-    ppss = mock_ppss(["binance BTC/USDT c 5m"], network)
+    ppss = mock_ppss(
+        [{"predict": "binance BTC/USDT c 5m", "train_on": "binance BTC/USDT c 5m"}],
+        network,
+    )
     web3_pp = ppss.web3_pp
     assert web3_pp.network == network
 

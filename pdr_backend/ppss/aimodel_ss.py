@@ -1,33 +1,55 @@
-from typing import Optional
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
+from typing import Optional, Tuple
 
-import numpy as np
 from enforce_typing import enforce_types
 
-from pdr_backend.ppss.base_ss import MultiFeedMixin
 from pdr_backend.util.strutil import StrMixin
 
-APPROACH_OPTIONS = ["LinearLogistic", "LinearSVC", "Constant"]
-WEIGHT_RECENT_OPTIONS = ["10x_5x", "None"]
+CLASSIF_APPROACH_OPTIONS = [
+    "ClassifLinearLasso",
+    "ClassifLinearLasso_Balanced",
+    "ClassifLinearRidge",
+    "ClassifLinearRidge_Balanced",
+    "ClassifLinearElasticNet",
+    "ClassifLinearElasticNet_Balanced",
+    "ClassifLinearSVM",
+    "ClassifGaussianProcess",
+    "ClassifXgboost",
+    "ClassifConstant",
+]
+REGR_APPROACH_OPTIONS = [
+    "RegrLinearLS",
+    "RegrLinearLasso",
+    "RegrLinearRidge",
+    "RegrLinearElasticNet",
+    "RegrGaussianProcess",
+    "RegrXgboost",
+    "RegrConstant",
+]
+APPROACH_OPTIONS = CLASSIF_APPROACH_OPTIONS + REGR_APPROACH_OPTIONS
+
+WEIGHT_RECENT_OPTIONS = ["10x_5x", "10000x", "None"]
 BALANCE_CLASSES_OPTIONS = ["SMOTE", "RandomOverSampler", "None"]
-CALIBRATE_PROBS_OPTIONS = ["CalibratedClassifierCV_5x", "None"]
+CALIBRATE_PROBS_OPTIONS = [
+    "CalibratedClassifierCV_Sigmoid",
+    "CalibratedClassifierCV_Isotonic",
+    "None",
+]
+CALIBRATE_REGR_OPTIONS = ["CurrentYval", "None"]
 
 
-@enforce_types
-class AimodelSS(MultiFeedMixin, StrMixin):
+class AimodelSS(StrMixin):
     __STR_OBJDIR__ = ["d"]
-    FEEDS_KEY = "input_feeds"
 
+    @enforce_types
     def __init__(self, d: dict):
-        super().__init__(
-            d, assert_feed_attributes=["signal"]
-        )  # yaml_dict["aimodel_ss"]
+        """d -- yaml_dict["aimodel_ss"]"""
+        self.d = d
 
         # test inputs
-        if not 0 < self.max_n_train:
-            raise ValueError(self.max_n_train)
-        if not 0 < self.autoregressive_n < np.inf:
-            raise ValueError(self.autoregressive_n)
-
         if self.approach not in APPROACH_OPTIONS:
             raise ValueError(self.approach)
         if self.weight_recent not in WEIGHT_RECENT_OPTIONS:
@@ -36,23 +58,22 @@ class AimodelSS(MultiFeedMixin, StrMixin):
             raise ValueError(self.balance_classes)
         if self.calibrate_probs not in CALIBRATE_PROBS_OPTIONS:
             raise ValueError(self.calibrate_probs)
+        if self.calibrate_regr not in CALIBRATE_REGR_OPTIONS:
+            raise ValueError(self.calibrate_regr)
+        self.validate_train_every_n_epochs(self.train_every_n_epochs)
+
+    # --------------------------------
+    # validators -- add as needed, when setters are added
+    def validate_train_every_n_epochs(self, n: int):
+        if n <= 0:
+            raise ValueError(n)
 
     # --------------------------------
     # yaml properties
 
     @property
-    def max_n_train(self) -> int:
-        """eg 50000. It's subject to what data is actually available"""
-        return self.d["max_n_train"]
-
-    @property
-    def autoregressive_n(self) -> int:
-        """eg 10. model inputs ar_n past pts z[t-1], .., z[t-ar_n]"""
-        return self.d["autoregressive_n"]
-
-    @property
     def approach(self) -> str:
-        """eg 'LinearLogistic'"""
+        """eg 'ClassifLinearRidge'"""
         return self.d["approach"]
 
     @property
@@ -66,18 +87,70 @@ class AimodelSS(MultiFeedMixin, StrMixin):
         return self.d["balance_classes"]
 
     @property
+    def train_every_n_epochs(self) -> int:
+        """eg 1. Train every 5 epochs"""
+        return int(self.d["train_every_n_epochs"])
+
+    @property
     def calibrate_probs(self) -> str:
-        """eg 'CalibratedClassifierCV_5x'"""
+        """eg 'CalibratedClassifierCV_Sigmoid'"""
         return self.d["calibrate_probs"]
 
-    # input feeds defined in base
+    @property
+    def seed(self) -> Optional[int]:
+        return self.d.get("seed", None)
+
+    @property
+    def calc_imps(self) -> bool:
+        """Calc feature importances"""
+        return self.d.get("calc_imps", True)
+
+    def calibrate_probs_skmethod(self, N: int) -> str:
+        """
+        @description
+          Return the value for 'method' argument in sklearn
+          CalibratedClassiferCV().
+
+        @arguments
+          N -- number of samples
+        """
+        if N < 200:
+            return "sigmoid"
+
+        c = self.calibrate_probs
+        if c == "CalibratedClassifierCV_Sigmoid":
+            return "sigmoid"
+        if c == "CalibratedClassifierCV_Isotonic":
+            return "isotonic"
+        raise ValueError(c)
+
+    @property
+    def calibrate_regr(self) -> str:
+        """eg 'CurrentYval'"""
+        return self.d["calibrate_regr"]
 
     # --------------------------------
     # derivative properties
     @property
-    def n(self) -> int:
-        """Number of input dimensions == # columns in X"""
-        return self.n_feeds * self.autoregressive_n
+    def do_regr(self) -> bool:
+        return self.approach[:4] == "Regr"
+
+    @property
+    def weight_recent_n(self) -> Tuple[int, int]:
+        """@return -- (n_repeat1, n_repeat2)"""
+        if self.weight_recent == "None":
+            return 0, 0
+        if self.weight_recent == "10x_5x":
+            return 10, 5
+        if self.weight_recent == "10000x":
+            return 10000, 0
+        raise ValueError(self.weight_recent)
+
+    # --------------------------------
+    # setters (only add as needed)
+    def set_train_every_n_epochs(self, n: int):
+        self.validate_train_every_n_epochs(n)
+        self.d["train_every_n_epochs"] = n
 
 
 # =========================================================================
@@ -86,22 +159,22 @@ class AimodelSS(MultiFeedMixin, StrMixin):
 
 @enforce_types
 def aimodel_ss_test_dict(
-    input_feeds: Optional[list] = None,
-    max_n_train: Optional[int] = None,
-    autoregressive_n: Optional[int] = None,
     approach: Optional[str] = None,
     weight_recent: Optional[str] = None,
     balance_classes: Optional[str] = None,
     calibrate_probs: Optional[str] = None,
+    calibrate_regr: Optional[str] = None,
+    train_every_n_epochs: Optional[int] = None,
 ) -> dict:
     """Use this function's return dict 'd' to construct AimodelSS(d)"""
     d = {
-        "input_feeds": input_feeds or ["binance BTC/USDT c"],
-        "max_n_train": 7 if max_n_train is None else max_n_train,
-        "autoregressive_n": 3 if autoregressive_n is None else autoregressive_n,
-        "approach": approach or "LinearLogistic",
+        "approach": approach or "ClassifLinearRidge",
         "weight_recent": weight_recent or "10x_5x",
         "balance_classes": balance_classes or "SMOTE",
-        "calibrate_probs": calibrate_probs or "CalibratedClassifierCV_5x",
+        "calibrate_probs": calibrate_probs or "CalibratedClassifierCV_Sigmoid",
+        "calibrate_regr": calibrate_regr or "None",
+        "train_every_n_epochs": (
+            1 if train_every_n_epochs is None else train_every_n_epochs
+        ),
     }
     return d

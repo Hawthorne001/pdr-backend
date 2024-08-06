@@ -1,3 +1,7 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 from enforce_typing import enforce_types
 from web3.types import TxParams, Wei as Web3Wei
 
@@ -22,10 +26,8 @@ class Token(BaseContract):
         tx = self.contract_instance.functions.transfer(
             to, int(amount.amt_wei)
         ).transact(call_params)
-
         if not wait_for_receipt:
             return tx
-
         return self.config.w3.eth.wait_for_transaction_receipt(tx)
 
     def approve(self, spender, amount: Wei, wait_for_receipt=True):

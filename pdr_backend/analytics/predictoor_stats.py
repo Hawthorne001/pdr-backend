@@ -1,8 +1,12 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 import logging
 import os
 from typing import Set, Tuple, TypedDict
 
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 import polars as pl
 from enforce_typing import enforce_types
 
@@ -34,16 +38,19 @@ class PredictoorStat(TypedDict):
 def get_feed_summary_stats(predictions_df: pl.DataFrame) -> pl.DataFrame:
     # 1 - filter from lake only the rows that you're looking for
     df = predictions_df.filter(
-        ~((pl.col("trueval").is_null()) | (pl.col("payout").is_null()))
+        ~((pl.col("truevalue").is_null()) | (pl.col("payout").is_null()))
     )
 
+    df = df.with_columns(
+        pl.col("predvalue").eq(pl.col("truevalue")).cast(pl.UInt8).alias("is_correct")
+    )
     # Group by pair
     df = df.group_by(["pair", "timeframe"]).agg(
         pl.col("source").first().alias("source"),
         pl.col("payout").sum().alias("sum_payout"),
         pl.col("stake").sum().alias("sum_stake"),
-        pl.col("prediction").count().alias("num_predictions"),
-        (pl.col("prediction").sum() / pl.col("pair").count() * 100).alias("accuracy"),
+        pl.col("predvalue").count().alias("num_predictions"),
+        (pl.col("predvalue").sum() / pl.col("pair").count() * 100).alias("accuracy"),
     )
 
     return df
@@ -53,16 +60,19 @@ def get_feed_summary_stats(predictions_df: pl.DataFrame) -> pl.DataFrame:
 def get_predictoor_summary_stats(predictions_df: pl.DataFrame) -> pl.DataFrame:
     # 1 - filter from lake only the rows that you're looking for
     df = predictions_df.filter(
-        ~((pl.col("trueval").is_null()) | (pl.col("payout").is_null()))
+        ~((pl.col("truevalue").is_null()) | (pl.col("payout").is_null()))
     )
 
+    df = df.with_columns(
+        pl.col("predvalue").eq(pl.col("truevalue")).cast(pl.UInt8).alias("is_correct")
+    )
     # Group by pair
     df = df.group_by(["user", "pair", "timeframe"]).agg(
         pl.col("source").first().alias("source"),
         pl.col("payout").sum().alias("sum_payout"),
         pl.col("stake").sum().alias("sum_stake"),
-        pl.col("prediction").count().alias("num_predictions"),
-        (pl.col("prediction").sum() / pl.col("pair").count() * 100).alias("accuracy"),
+        pl.col("predvalue").count().alias("num_predictions"),
+        (pl.col("predvalue").sum() / pl.col("pair").count() * 100).alias("accuracy"),
     )
 
     return df
@@ -122,20 +132,21 @@ def plot_traction_daily_statistics(stats_df: pl.DataFrame, pq_dir: str) -> None:
 
     # draw unique_predictoors
     chart_path = os.path.join(charts_dir, "daily_unique_predictoors.png")
-    plt.figure(figsize=(10, 6))
-    plt.plot(
-        stats_df["datetime"].to_pandas(),
-        stats_df["daily_unique_predictoors_count"],
-        marker="o",
-        linestyle="-",
+
+    fig = go.Figure(
+        go.Scatter(
+            x=stats_df["datetime"].to_pandas(),
+            y=stats_df["daily_unique_predictoors_count"],
+            mode="markers",
+        )
     )
-    plt.xlabel("Date")
-    plt.ylabel("# Unique Predictoor Addresses")
-    plt.title("Daily # Unique Predictoor Addresses")
-    plt.xticks(range(0, len(dates), ticks), dates[::ticks], rotation=90)
-    plt.tight_layout()
-    plt.savefig(chart_path)
-    plt.close()
+
+    fig.update_layout(xaxis_title="Date", yaxis_title="# Unique Predictoor Addresses")
+    fig.update_layout(title="Daily # Unique Predictoor Addresses")
+    fig.update_layout(xaxis={"tickmode": "array", "tickvals": dates[::ticks]})
+
+    fig.write_image(chart_path)
+
     logger.info("Chart created: %s", chart_path)
 
 
@@ -151,20 +162,20 @@ def plot_traction_cum_sum_statistics(stats_df: pl.DataFrame, pq_dir: str) -> Non
 
     # draw cum_unique_predictoors
     chart_path = os.path.join(charts_dir, "daily_cumulative_unique_predictoors.png")
-    plt.figure(figsize=(10, 6))
-    plt.plot(
-        stats_df["datetime"].to_pandas(),
-        stats_df["cum_daily_unique_predictoors_count"],
-        marker="o",
-        linestyle="-",
+
+    fig = go.Figure(
+        go.Scatter(
+            x=stats_df["datetime"].to_pandas(),
+            y=stats_df["cum_daily_unique_predictoors_count"],
+            mode="markers",
+        )
     )
-    plt.xlabel("Date")
-    plt.ylabel("# Unique Predictoor Addresses")
-    plt.title("Cumulative # Unique Predictoor Addresses")
-    plt.xticks(range(0, len(dates), ticks), dates[::ticks], rotation=90)
-    plt.tight_layout()
-    plt.savefig(chart_path)
-    plt.close()
+
+    fig.update_layout(xaxis_title="Date", yaxis_title="# Unique Predictoor Addresses")
+    fig.update_layout(title="Cumulative # Unique Predictoor Addresses")
+    fig.update_layout(xaxis={"tickmode": "array", "tickvals": dates[::ticks]})
+    fig.write_image(chart_path)
+
     logger.info("Chart created: %s", chart_path)
 
 
@@ -272,36 +283,37 @@ def plot_slot_daily_statistics(slots_df: pl.DataFrame, pq_dir: str) -> None:
 
     # draw daily predictoor stake in $OCEAN
     chart_path = os.path.join(charts_dir, "daily_average_stake.png")
-    plt.figure(figsize=(10, 6))
-    plt.plot(
-        slots_daily_df["datetime"].to_pandas(),
-        slots_daily_df["daily_average_stake"],
-        marker="o",
-        linestyle="-",
+
+    fig = go.Figure(
+        go.Scatter(
+            x=slots_daily_df["datetime"].to_pandas(),
+            y=slots_daily_df["daily_average_stake"],
+            mode="markers",
+        )
     )
-    plt.xlabel("Date")
-    plt.ylabel("Average $OCEAN Staked")
-    plt.title("Daily average $OCEAN staked per slot, across all Feeds")
-    plt.xticks(range(0, len(dates), ticks), dates[::ticks], rotation=90)
-    plt.tight_layout()
-    plt.savefig(chart_path)
-    plt.close()
+
+    fig.update_layout(xaxis_title="Date", yaxis_title="Average $OCEAN Staked")
+    fig.update_layout(title="Daily average $OCEAN staked per slot, across all Feeds")
+    fig.update_layout(xaxis={"tickmode": "array", "tickvals": dates[::ticks]})
+
+    fig.write_image(chart_path)
+
     logger.info("Chart created: %s", chart_path)
 
     # draw daily predictoor payouts in $OCEAN
     chart_path = os.path.join(charts_dir, "daily_slot_average_predictoors.png")
-    plt.figure(figsize=(10, 6))
-    plt.plot(
-        slots_daily_df["datetime"].to_pandas(),
-        slots_daily_df["daily_average_predictoor_count"],
-        marker="o",
-        linestyle="-",
+    fig = go.Figure(
+        go.Scatter(
+            x=slots_daily_df["datetime"].to_pandas(),
+            y=slots_daily_df["daily_average_predictoor_count"],
+            mode="markers",
+        )
     )
-    plt.xlabel("Date")
-    plt.ylabel("Average Predictoors")
-    plt.title("Average # Predictoors competing per slot, per feed")
-    plt.xticks(range(0, len(dates), ticks), dates[::ticks], rotation=90)
-    plt.tight_layout()
-    plt.savefig(chart_path)
-    plt.close()
+
+    fig.update_layout(xaxis_title="Date", yaxis_title="Average Predictoors")
+    fig.update_layout(title="Average # Predictoors competing per slot, per feed")
+    fig.update_layout(xaxis={"tickmode": "array", "tickvals": dates[::ticks]})
+
+    fig.write_image(chart_path)
+
     logger.info("Chart created: %s", chart_path)

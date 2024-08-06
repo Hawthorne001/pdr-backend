@@ -1,3 +1,7 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 import logging
 from pdr_backend.subgraph.core_subgraph import query_subgraph
 from pdr_backend.util.time_types import UnixTimeS
@@ -6,7 +10,7 @@ logger = logging.getLogger("subgraph")
 
 
 def get_consume_so_far(
-    predictoor_contracts,
+    feed_contracts,
     week_start_timestamp: UnixTimeS,
     consumer_address,
     subgraph_url,
@@ -43,7 +47,7 @@ def get_consume_so_far(
             if new_orders == []:
                 break
             for order in new_orders:
-                if order["id"] in predictoor_contracts:
+                if order["id"] in feed_contracts:
                     if len(order["token"]["orders"]) > 0:
                         for buy in order["token"]["orders"]:
                             consume_so_far = consume_so_far + float(

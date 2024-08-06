@@ -1,3 +1,7 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 import pytest
 import requests
 from enforce_typing import enforce_types
@@ -46,7 +50,7 @@ def test_query_feed_contracts__fullchain(monkeypatch):
     # This test is a simple-as-possible happy path. Start here.
     # Then follow up with test_filter() below, which is complex but thorough
 
-    info = {"pair": "BTC/USDT", "timeframe": "5m", "source": "binance"}
+    info = {"pair": "BTC-USDT", "timeframe": "5m", "source": "binance"}
     contract = mock_contract(info, "contract1")
     contract_addr = contract["id"]
 

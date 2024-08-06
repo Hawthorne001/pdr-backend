@@ -1,3 +1,8 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
+import asyncio
 import logging
 import os
 from typing import Dict
@@ -7,11 +12,9 @@ from enforce_typing import enforce_types
 
 from pdr_backend.cli.arg_feed import ArgFeed
 from pdr_backend.cli.arg_timeframe import ArgTimeframe
-from pdr_backend.lake.constants import (
-    TOHLCV_SCHEMA_PL,
-    TOHLCV_COLS,
-)
-from pdr_backend.lake.fetch_ohlcv import clean_raw_ohlcv, safe_fetch_ohlcv_ccxt
+from pdr_backend.exchange.fetch_ohlcv import fetch_ohlcv
+from pdr_backend.lake.clean_raw_ohlcv import clean_raw_ohlcv
+from pdr_backend.lake.constants import TOHLCV_COLS, TOHLCV_SCHEMA_PL
 from pdr_backend.lake.merge_df import merge_rawohlcv_dfs
 from pdr_backend.lake.plutil import (
     concat_next_df,
@@ -24,7 +27,6 @@ from pdr_backend.lake.plutil import (
 )
 from pdr_backend.ppss.lake_ss import LakeSS
 from pdr_backend.util.time_types import UnixTimeMs
-
 
 logger = logging.getLogger("ohlcv_data_factory")
 
@@ -80,7 +82,8 @@ class OhlcvDataFactory:
         logger.info("Data start: %s", self.ss.st_timestamp.pretty_timestr())
         logger.info("Data fin: %s", fin_ut.pretty_timestr())
 
-        self._update_rawohlcv_files(fin_ut)
+        asyncio.run(self._update_rawohlcv_files(fin_ut))
+        logger.info("Update all rawohlcv files: done")
         rawohlcv_dfs = self._load_rawohlcv_files(fin_ut)
         mergedohlcv_df = merge_rawohlcv_dfs(rawohlcv_dfs)
 
@@ -90,26 +93,26 @@ class OhlcvDataFactory:
         assert isinstance(mergedohlcv_df, pl.DataFrame)
         return mergedohlcv_df
 
-    def _update_rawohlcv_files(self, fin_ut: UnixTimeMs):
+    async def _update_rawohlcv_files(self, fin_ut: UnixTimeMs):
         logger.info("Update all rawohlcv files: begin")
+        tasks = []
         for feed in self.ss.feeds:
-            self._update_rawohlcv_files_at_feed(feed, fin_ut)
+            tasks.append(self._update_rawohlcv_files_at_feed(feed, fin_ut))
 
-        logger.info("Update all rawohlcv files: done")
+        await asyncio.gather(*tasks)
 
-    def _update_rawohlcv_files_at_feed(self, feed: ArgFeed, fin_ut: UnixTimeMs):
+    async def _update_rawohlcv_files_at_feed(self, feed: ArgFeed, fin_ut: UnixTimeMs):
         """
         @arguments
           feed -- ArgFeed
           fin_ut -- a timestamp, in ms, in UTC
         """
-        pair_str = str(feed.pair)
-        exch_str = str(feed.exchange)
+        exch_str: str = str(feed.exchange)
+        pair_str: str = str(feed.pair)
         assert "/" in str(pair_str), f"pair_str={pair_str} needs '/'"
 
-        logger.info(
-            "Update rawohlcv file at exchange=%s, pair=%s: begin", exch_str, pair_str
-        )
+        update_s = f"Update rawohlcv file at exch={exch_str}, pair={pair_str}"
+        logger.info("%s: begin", update_s)
 
         filename = self._rawohlcv_filename(feed)
         logger.info("filename=%s", filename)
@@ -126,16 +129,15 @@ class OhlcvDataFactory:
         while True:
             limit = 1000
             logger.info("Fetch up to %s pts from %s", limit, st_ut.pretty_timestr())
-            exch = feed.ccxt_exchange()
-            raw_tohlcv_data = safe_fetch_ohlcv_ccxt(
-                exch,
-                symbol=str(pair_str).replace("-", "/"),
+            raw_tohlcv_data = fetch_ohlcv(
+                exchange_str=exch_str,
+                pair_str=pair_str,
                 timeframe=str(feed.timeframe),
                 since=st_ut,
                 limit=limit,
+                api=self.ss.api,
             )
             tohlcv_data = clean_raw_ohlcv(raw_tohlcv_data, feed, st_ut, fin_ut)
-
             # concat both TOHLCV data
             next_df = pl.DataFrame(
                 tohlcv_data,
@@ -157,9 +159,7 @@ class OhlcvDataFactory:
         save_rawohlcv_file(filename, df)
 
         # done
-        logger.info(
-            "Update rawohlcv file at exchange=%s, pair=%s: done", exch_str, pair_str
-        )
+        logger.info("%s: done", update_s)
 
     def _calc_start_ut_maybe_delete(
         self, timeframe: ArgTimeframe, filename: str
@@ -250,5 +250,5 @@ class OhlcvDataFactory:
         assert "/" in str(pair_str) or "-" in pair_str, pair_str
         pair_str = str(pair_str).replace("/", "-")  # filesystem needs "-"
         basename = f"{feed.exchange}_{pair_str}_{feed.timeframe}.parquet"
-        filename = os.path.join(self.ss.parquet_dir, basename)
+        filename = os.path.join(self.ss.lake_dir, basename)
         return filename

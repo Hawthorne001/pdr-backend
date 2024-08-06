@@ -1,3 +1,7 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 import os
 from argparse import Namespace
 from unittest.mock import Mock, patch
@@ -5,28 +9,34 @@ from unittest.mock import Mock, patch
 import pytest
 from enforce_typing import enforce_types
 
+# below, import in same order as cli_arguments.HELP_LONG
 from pdr_backend.cli.cli_module import (
-    _do_main,
-    do_check_network,
+    # main tools
+    do_sim,
+    do_predictoor,
+    do_trader,
     do_claim_OCEAN,
     do_claim_ROSE,
-    do_dfbuyer,
-    do_get_predictions_info,
+    # power tools
+    do_multisim,
+    do_ohlcv,
+    # utilities
     do_get_predictoors_info,
+    do_get_predictions_info,
     do_get_traction_info,
-    do_lake,
-    do_analytics,
-    do_predictoor,
-    do_publisher,
-    do_sim,
-    do_topup,
+    do_check_network,
     do_create_accounts,
-    do_view_accounts,
+    do_print_balances,
     do_fund_accounts,
-    do_trader,
+    # tools for core team
     do_trueval,
+    do_dfbuyer,
+    do_publisher,
+    do_topup,
+    # (and, main)
+    _do_main,
 )
-from pdr_backend.ppss.ppss import PPSS
+from pdr_backend.ppss.ppss import PPSS as PPSSClass
 
 
 class _APPROACH:
@@ -49,6 +59,13 @@ class _PPSS:
     PPSS_FILE = os.path.abspath("ppss.yaml")
 
 
+class _PPSS_OBJ:
+    PPSS = PPSSClass(
+        yaml_filename=os.path.abspath("ppss.yaml"),
+        network="development",
+    )
+
+
 class _NETWORK:
     NETWORK = "development"
 
@@ -66,7 +83,7 @@ class _END:
 
 
 class _PQDIR:
-    PQDIR = "my_parquet_data/"
+    PQDIR = "my_lake_data/"
 
 
 class _FEEDS:
@@ -79,6 +96,10 @@ class _PDRS:
 
 class _NUM:
     NUM = 1
+
+
+class _ACCOUNT:
+    ACCOUNT = "0xd2a24cb4ff2584bad80ff5f109034a891c3d88dd"
 
 
 class _ACCOUNTS:
@@ -100,7 +121,7 @@ class _Base:
 
 class MockArgParser_PPSS(_Base):
     def parse_args(self):
-        class MockArgs(Namespace, _PPSS):
+        class MockArgs(Namespace, _PPSS, _PPSS_OBJ):
             pass
 
         return MockArgs()
@@ -108,7 +129,7 @@ class MockArgParser_PPSS(_Base):
 
 class MockArgParser_PPSS_NETWORK(_Base):
     def parse_args(self):
-        class MockArgs(Namespace, _PPSS, _NETWORK):
+        class MockArgs(Namespace, _PPSS, _NETWORK, _PPSS_OBJ):
             pass
 
         return MockArgs()
@@ -120,7 +141,7 @@ class MockArgParser_APPROACH_PPSS_NETWORK(_Base):
         super().__init__()
 
     def parse_args(self):
-        class MockArgs(Namespace, self.approach, _PPSS, _NETWORK):
+        class MockArgs(Namespace, self.approach, _PPSS, _NETWORK, _PPSS_OBJ):
             pass
 
         return MockArgs()
@@ -128,7 +149,7 @@ class MockArgParser_APPROACH_PPSS_NETWORK(_Base):
 
 class MockArgParser_PPSS_NETWORK_LOOKBACK(_Base):
     def parse_args(self):
-        class MockArgs(Namespace, _PPSS, _NETWORK, _LOOKBACK):
+        class MockArgs(Namespace, _PPSS, _NETWORK, _LOOKBACK, _PPSS_OBJ):
             pass
 
         return MockArgs()
@@ -137,7 +158,7 @@ class MockArgParser_PPSS_NETWORK_LOOKBACK(_Base):
 class MockArgParser_ST_END_PQDIR_NETWORK_PPSS_PDRS(_Base):
     def parse_args(self):
         class MockArgs(  # pylint: disable=too-many-ancestors
-            Namespace, _ST, _END, _PQDIR, _NETWORK, _PPSS, _PDRS
+            Namespace, _ST, _END, _PQDIR, _NETWORK, _PPSS, _PDRS, _PPSS_OBJ
         ):
             pass
 
@@ -147,7 +168,7 @@ class MockArgParser_ST_END_PQDIR_NETWORK_PPSS_PDRS(_Base):
 class MockArgParser_ST_END_PQDIR_NETWORK_PPSS_FEEDS(_Base):
     def parse_args(self):
         class MockArgs(  # pylint: disable=too-many-ancestors
-            Namespace, _ST, _END, _PQDIR, _NETWORK, _PPSS, _FEEDS
+            Namespace, _ST, _END, _PQDIR, _NETWORK, _PPSS, _FEEDS, _PPSS_OBJ
         ):
             pass
 
@@ -162,9 +183,9 @@ class MockArgParser_NUM(_Base):
         return MockArgs()
 
 
-class MockArgParser_ACCOUNTS_PPSS_NETWORK(_Base):
+class MockArgParser_ACCOUNT_PPSS_NETWORK(_Base):
     def parse_args(self):
-        class MockArgs(Namespace, _ACCOUNTS, _PPSS, _NETWORK):
+        class MockArgs(Namespace, _ACCOUNT, _PPSS, _NETWORK, _PPSS_OBJ):
             pass
 
         return MockArgs()
@@ -172,8 +193,15 @@ class MockArgParser_ACCOUNTS_PPSS_NETWORK(_Base):
 
 class MockArgParser_TOKEN_AMOUNT_ACCOUNTS_TOKEN_PPSS_NETWORK(_Base):
     def parse_args(self):
+        # pylint: disable=too-many-ancestors
         class MockArgs(
-            Namespace, _TOKEN_AMOUNT, _ACCOUNTS, _PPSS, _NETWORK, _NATIVE_TOKEN
+            Namespace,
+            _TOKEN_AMOUNT,
+            _ACCOUNTS,
+            _PPSS,
+            _NETWORK,
+            _NATIVE_TOKEN,
+            _PPSS_OBJ,
         ):
             pass
 
@@ -184,7 +212,7 @@ class MockArgParser_TOKEN_AMOUNT_ACCOUNTS_TOKEN_PPSS_NETWORK(_Base):
 class MockAgent:
     was_run = False
 
-    def __init__(self, ppss: PPSS, *args, **kwargs):
+    def __init__(self, ppss: PPSSClass, *args, **kwargs):
         pass
 
     def run(self, *args, **kwargs):  # pylint: disable=unused-argument
@@ -193,34 +221,45 @@ class MockAgent:
 
 _CLI_PATH = "pdr_backend.cli.cli_module"
 
+# ===============================================================
+# Below, implement tests in same order as cli_arguments.HELP_LONG
+
+# ---------------------------------------------------------------
+# test: Main tools
+
 
 @enforce_types
-def test_do_check_network(monkeypatch):
+def test_do_sim(monkeypatch):
     mock_f = Mock()
-    monkeypatch.setattr(f"{_CLI_PATH}.check_network_main", mock_f)
+    monkeypatch.setattr(f"{_CLI_PATH}.SimEngine.run", mock_f)
 
-    do_check_network(MockArgParser_PPSS_NETWORK_LOOKBACK().parse_args())
+    do_sim(MockArgParser_PPSS().parse_args())
+
     mock_f.assert_called()
 
 
 @enforce_types
-def test_do_lake(monkeypatch):
-    mock_f = Mock()
-    monkeypatch.setattr(f"{_CLI_PATH}.OhlcvDataFactory.get_mergedohlcv_df", mock_f)
+def test_do_predictoor(monkeypatch):
+    monkeypatch.setattr(f"{_CLI_PATH}.PredictoorAgent", MockAgent)
 
-    do_lake(MockArgParser_PPSS_NETWORK().parse_args())
-    mock_f.assert_called()
+    do_predictoor(MockArgParser_APPROACH_PPSS_NETWORK().parse_args())
+    assert MockAgent.was_run
 
 
 @enforce_types
-def test_do_analytics(monkeypatch):
-    mock_f = Mock()
-    monkeypatch.setattr(f"{_CLI_PATH}.GQLDataFactory", mock_f)
-    monkeypatch.setattr(f"{_CLI_PATH}.ETL", mock_f)
-    monkeypatch.setattr(f"{_CLI_PATH}.ETL.do_etl", mock_f)
+def test_do_trader(monkeypatch):
+    monkeypatch.setattr(f"{_CLI_PATH}.TraderAgent1", MockAgent)
 
-    do_analytics(MockArgParser_PPSS_NETWORK().parse_args())
-    mock_f.assert_called()
+    do_trader(MockArgParser_APPROACH_PPSS_NETWORK().parse_args())
+    assert MockAgent.was_run
+
+    monkeypatch.setattr(f"{_CLI_PATH}.TraderAgent2", MockAgent)
+
+    do_trader(MockArgParser_APPROACH_PPSS_NETWORK(_APPROACH2).parse_args())
+    assert MockAgent.was_run
+
+    with pytest.raises(ValueError):
+        do_trader(MockArgParser_APPROACH_PPSS_NETWORK(_APPROACH_BAD).parse_args())
 
 
 @enforce_types
@@ -241,12 +280,41 @@ def test_do_claim_ROSE(monkeypatch):
     mock_f.assert_called()
 
 
-@enforce_types
-def test_do_dfbuyer(monkeypatch):
-    monkeypatch.setattr(f"{_CLI_PATH}.DFBuyerAgent", MockAgent)
+# ---------------------------------------------------------------
+# test: Power tools
 
-    do_dfbuyer(MockArgParser_PPSS_NETWORK().parse_args())
-    assert MockAgent.was_run
+
+@enforce_types
+def test_do_multisim(monkeypatch):
+    mock_f = Mock()
+    monkeypatch.setattr(f"{_CLI_PATH}.MultisimEngine.run", mock_f)
+
+    ppss = MockArgParser_PPSS().parse_args()
+    do_multisim(ppss)
+
+    mock_f.assert_called()
+
+
+@enforce_types
+def test_do_ohlcv(monkeypatch):
+    mock_f = Mock()
+    monkeypatch.setattr(f"{_CLI_PATH}.OhlcvDataFactory.get_mergedohlcv_df", mock_f)
+
+    do_ohlcv(MockArgParser_PPSS_NETWORK().parse_args())
+    mock_f.assert_called()
+
+
+# ---------------------------------------------------------------
+# test: Utilities
+
+
+@enforce_types
+def test_do_get_predictoors_info(monkeypatch):
+    mock_f = Mock()
+    monkeypatch.setattr(f"{_CLI_PATH}.get_predictoors_info_main", mock_f)
+
+    do_get_predictoors_info(MockArgParser_ST_END_PQDIR_NETWORK_PPSS_PDRS().parse_args())
+    mock_f.assert_called()
 
 
 @enforce_types
@@ -261,15 +329,6 @@ def test_do_get_predictions_info(monkeypatch):
 
 
 @enforce_types
-def test_do_get_predictoors_info(monkeypatch):
-    mock_f = Mock()
-    monkeypatch.setattr(f"{_CLI_PATH}.get_predictoors_info_main", mock_f)
-
-    do_get_predictoors_info(MockArgParser_ST_END_PQDIR_NETWORK_PPSS_PDRS().parse_args())
-    mock_f.assert_called()
-
-
-@enforce_types
 def test_do_get_traction_info(monkeypatch):
     mock_f = Mock()
     monkeypatch.setattr(f"{_CLI_PATH}.get_traction_info_main", mock_f)
@@ -279,10 +338,60 @@ def test_do_get_traction_info(monkeypatch):
 
 
 @enforce_types
-def test_do_predictoor(monkeypatch):
-    monkeypatch.setattr(f"{_CLI_PATH}.PredictoorAgent", MockAgent)
+def test_do_check_network(monkeypatch):
+    mock_f = Mock()
+    monkeypatch.setattr(f"{_CLI_PATH}.check_network_main", mock_f)
 
-    do_predictoor(MockArgParser_APPROACH_PPSS_NETWORK().parse_args())
+    do_check_network(MockArgParser_PPSS_NETWORK_LOOKBACK().parse_args())
+    mock_f.assert_called()
+
+
+@enforce_types
+def test_do_create_accounts(monkeypatch):
+    mock_f = Mock()
+    monkeypatch.setattr(f"{_CLI_PATH}.create_accounts", mock_f)
+
+    do_create_accounts(MockArgParser_NUM().parse_args())
+    mock_f.assert_called()
+
+
+@enforce_types
+def test_do_print_balances(monkeypatch):
+    mock_f = Mock()
+    monkeypatch.setattr(f"{_CLI_PATH}.print_balances", mock_f)
+
+    do_print_balances(MockArgParser_ACCOUNT_PPSS_NETWORK().parse_args())
+    mock_f.assert_called()
+
+
+@enforce_types
+def test_do_fund_accounts(monkeypatch):
+    mock_f = Mock()
+    monkeypatch.setattr(f"{_CLI_PATH}.fund_accounts", mock_f)
+
+    do_fund_accounts(
+        MockArgParser_TOKEN_AMOUNT_ACCOUNTS_TOKEN_PPSS_NETWORK().parse_args()
+    )
+    mock_f.assert_called()
+
+
+# ---------------------------------------------------------------
+# test: Tools for core team
+
+
+@enforce_types
+def test_do_trueval(monkeypatch):
+    monkeypatch.setattr(f"{_CLI_PATH}.TruevalAgent", MockAgent)
+
+    do_trueval(MockArgParser_PPSS_NETWORK().parse_args())
+    assert MockAgent.was_run
+
+
+@enforce_types
+def test_do_dfbuyer(monkeypatch):
+    monkeypatch.setattr(f"{_CLI_PATH}.DFBuyerAgent", MockAgent)
+
+    do_dfbuyer(MockArgParser_PPSS_NETWORK().parse_args())
     assert MockAgent.was_run
 
 
@@ -304,72 +413,12 @@ def test_do_topup(monkeypatch):
     mock_f.assert_called()
 
 
-@enforce_types
-def test_do_create_accounts(monkeypatch):
-    mock_f = Mock()
-    monkeypatch.setattr(f"{_CLI_PATH}.create_accounts", mock_f)
-
-    do_create_accounts(MockArgParser_NUM().parse_args())
-    mock_f.assert_called()
+# ---------------------------------------------------------------
+# (test _do_main)
 
 
 @enforce_types
-def test_do_view_accounts(monkeypatch):
-    mock_f = Mock()
-    monkeypatch.setattr(f"{_CLI_PATH}.view_accounts", mock_f)
-
-    do_view_accounts(MockArgParser_ACCOUNTS_PPSS_NETWORK().parse_args())
-    mock_f.assert_called()
-
-
-@enforce_types
-def test_do_fund_accounts(monkeypatch):
-    mock_f = Mock()
-    monkeypatch.setattr(f"{_CLI_PATH}.fund_accounts", mock_f)
-
-    do_fund_accounts(
-        MockArgParser_TOKEN_AMOUNT_ACCOUNTS_TOKEN_PPSS_NETWORK().parse_args()
-    )
-    mock_f.assert_called()
-
-
-@enforce_types
-def test_do_trader(monkeypatch):
-    monkeypatch.setattr(f"{_CLI_PATH}.TraderAgent1", MockAgent)
-
-    do_trader(MockArgParser_APPROACH_PPSS_NETWORK().parse_args())
-    assert MockAgent.was_run
-
-    monkeypatch.setattr(f"{_CLI_PATH}.TraderAgent2", MockAgent)
-
-    do_trader(MockArgParser_APPROACH_PPSS_NETWORK(_APPROACH2).parse_args())
-    assert MockAgent.was_run
-
-    with pytest.raises(ValueError):
-        do_trader(MockArgParser_APPROACH_PPSS_NETWORK(_APPROACH_BAD).parse_args())
-
-
-@enforce_types
-def test_do_trueval(monkeypatch):
-    monkeypatch.setattr(f"{_CLI_PATH}.TruevalAgent", MockAgent)
-
-    do_trueval(MockArgParser_PPSS_NETWORK().parse_args())
-    assert MockAgent.was_run
-
-
-@enforce_types
-def test_do_sim(monkeypatch):
-    mock_f = Mock()
-    monkeypatch.setattr(f"{_CLI_PATH}.SimEngine.run", mock_f)
-
-    with patch("pdr_backend.sim.sim_plotter.plt.show"):
-        do_sim(MockArgParser_PPSS_NETWORK().parse_args())
-
-    mock_f.assert_called()
-
-
-@enforce_types
-def test_do_main(monkeypatch, capfd):
+def test_do_main(capfd):
     with patch("sys.argv", ["pdr", "help"]):
         with pytest.raises(SystemExit):
             _do_main()
@@ -381,12 +430,3 @@ def test_do_main(monkeypatch, capfd):
             _do_main()
 
     assert "Predictoor tool" in capfd.readouterr().out
-
-    mock_f = Mock()
-    monkeypatch.setattr(f"{_CLI_PATH}.SimEngine.run", mock_f)
-
-    with patch("pdr_backend.sim.sim_plotter.plt.show"):
-        with patch("sys.argv", ["pdr", "sim", "ppss.yaml"]):
-            _do_main()
-
-    assert mock_f.called

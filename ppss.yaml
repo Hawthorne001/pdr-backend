@@ -1,65 +1,100 @@
+##
+## Copyright 2024 Ocean Protocol Foundation
+## SPDX-License-Identifier: Apache-2.0
+##
+
 # (web3_pp / network settings is at bottom, because it's long)
 lake_ss:
-  parquet_dir: parquet_data
+  lake_dir: lake_data
   feeds:
     - binance BTC/USDT ETH/USDT 5m
   #    - binance BTC/USDT ETH/USDT BNB/USDT XRP/USDT ADA/USDT DOGE/USDT SOL/USDT LTC/USDT TRX/USDT DOT/USDT 5m
   #    - kraken BTC/USDT 5m
-  st_timestr: 2023-06-01_00:00 # starting date for data
+  st_timestr: 30 days ago # starting date for data
   fin_timestr: now # ending date for data
+  api: ccxt
 
 predictoor_ss:
-  predict_feed: binance BTC/USDT c 5m
-  approach: 2 # 1->50/50; 2->model-based
+  predict_train_feedsets:
+    - predict: binance BTC/USDT c 5m
+      train_on:
+      - binance BTC/USDT c 5m
+  approach: 2 # 1->50/50; 2->two-sided model-based; 3-> one-sided model-based
   stake_amount: 100 # How much your bot stakes. In OCEAN per epoch, per feed
-
   sim_only:
     others_stake: 10000 # How much all others' bots stake. In OCEAN per epoch, per feed. Calcs: stake volume = 10e6 $/day/20_feeds = 34700 $/epoch/20_feeds (bc 288 5m epochs/day) = 1735 $/epoch/feed = 2313 OCEAN/epoch/feed (at 1 OCEAN=$0.75)
     others_accuracy: 0.50001 # What percent of others' bots stake is correct. Value in range 0.0-1.0. 0.50001 means mostly 50-50 stake and some small fry predicting a bit accurately
     revenue: 0.93006 # Sales revenue going towards predictoors. In OCEAN per epoch, per feed. Calcs: 37500 OCEAN/week/20_feeds (Predictoor DF rewards) = 18.6012 OCEAN/epoch/20_feeds (bc 2016 5m epochs/week) = 0.93006 OCEAN/epoch/feed
 
   bot_only:
-    s_until_epoch_end: 60 # in s. Start predicting if there's > this time left
-    s_start_payouts: 220 # in s. Run payout when there's this seconds left, set to 0 to disable
-    s_cutoff: 20 # in s. Stop predicting if there's < this time left
-
-  aimodel_ss:
-    input_feeds:
-      - binance BTC/USDT ETH/USDT c 5m
-    max_n_train: 5000 # no. epochs to train model on
-    autoregressive_n: 1 # no. epochs that model looks back, to predict next
-    approach: LinearLogistic # LinearLogistic | LinearSVC | Constant
-    weight_recent: 10x_5x # 10x_5x | None
+    pred_submitter_mgr: "DeployNewMgr" # DeployNewMgr | <address of deployed mgr>
+    s_start_payouts: 220 # in s. Run payout if > this time left. 0 to disable
+    s_until_epoch_end: 60 # in s. Start predicting if > this time left
+    payout_batch_size: 8 # no. epochs to payout in each batch
+    min_payout_slots: 0 # Run payout if payout is available for > this many slots
+    
+  aimodel_data_ss: # used by AimodelDataFactory
+    max_n_train: 1000 # no. epochs to train model on
+    autoregressive_n: 2 # no. epochs that model looks back, to predict next
+    transform: None # None -> raw value of signal; RelDiff -> rel % diff
+    
+  aimodel_ss: # used by AimodelFactory
+    approach: ClassifLinearRidge # ClassifLinearLasso | ClassifLinearLasso_Balanced | ClassifLinearRidge | ClassifLinearRidge_Balanced | ClassifLinearElasticNet | ClassifLinearElasticNet_Balanced | ClassifLinearSVM | ClassifGaussianProcess | ClassifXgboost | ClassifConstant | RegrLinearLS | RegrLinearLasso | RegrLinearRidge | RegrLinearElasticNet |  RegrGaussianProcess | RegrXgboost | RegrConstant
+    weight_recent: 10x_5x # 10x_5x | 10000x | None
     balance_classes: None # SMOTE | RandomOverSampler | None
-    calibrate_probs: CalibratedClassifierCV_5x # CalibratedClassifierCV_5x | None
+    calibrate_probs: CalibratedClassifierCV_Sigmoid # CalibratedClassifierCV_Sigmoid | CalibratedClassifierCV_Isotonic | None
+    calibrate_regr: CurrentYval # CurrentYval | None
+    train_every_n_epochs: 1
+    calc_imps: True
+    # seed: 42
+
+  my_addresses: []
+
+exchange_mgr_ss: # used by trader and sim
+  timeout: 30000
+  ccxt_params:
+    createMarketBuyOrderRequiresPrice: False
+    defaultType: spot
 
 trader_ss:
   feed: binance BTC/USDT c 5m
   sim_only:
     buy_amt: 1000 USD # buy this amount in each epoch
     fee_percent: 0.0 # simulated % fee
-    init_holdings:
-      - 100000 USDT
-      - 2 BTC
+    confidence_threshold: 0.02 # skip trade if confidence < this
+    stop_loss_percent: 1.0 # sell if price drops by this %, . 1.0 = disabled
+    take_profit_percent: 100.0 # sell if price rises by this %, . 100.0 = disabled
+
   bot_only:
     min_buffer: 30 # in s. only trade if there's > this time left
     max_tries: 10 # max no. attempts to process a feed
     position_size: 3 # buy/sell this amount in each epoch
-  exchange_only:
-    timeout: 30000
-    options:
-      createMarketBuyOrderRequiresPrice": False
-      defaultType: spot
 
 sim_ss: # sim only
-  do_plot: True
   log_dir: logs
   test_n: 5000 # number of epochs to simulate
-  exchange_only:
-    timeout: 30000
-    options:
-      createMarketBuyOrderRequiresPrice": False
-      defaultType: spot
+  tradetype: histmock # histmock | livemock | livereal
+  use_own_model: True # use own model predictions signals if true, else use chain signals
+
+multisim_ss:
+  approach: SimpleSweep # SimpleSweep | FastSweep (future) | ..
+  sweep_params:
+  - trader_ss.buy_amt: 1000 USD
+  - predictoor_ss.aimodel_data_ss.max_n_train: 500, 1000, 1500
+  - predictoor_ss.aimodel_data_ss.autoregressive_n: 1, 2
+  - predictoor_ss.predict_train_feedsets:
+    -
+      - predict: binance BTC/USDT c 5m
+        train_on:
+        - binance BTC/USDT c 5m
+    -
+      - predict: binance BTC/USDT ETH/USDT c 5m
+        train_on:
+        - binance BTC/USDT ETH/USDT c 5m
+#      - binance BTC/USDT c 5m
+#      - kraken BTC/USDT c 5m
+
+
 
 # ------------------------------------------------------------------
 # Bots run by OPF

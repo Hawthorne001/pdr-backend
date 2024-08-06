@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #
-# Copyright 2023 Ocean Protocol Foundation
+# Copyright 2024 Ocean Protocol Foundation
 # SPDX-License-Identifier: Apache-2.0
 #
 from setuptools import find_packages, setup
@@ -9,37 +9,46 @@ from setuptools import find_packages, setup
 # Installed by pip install pdr-backend
 # or pip install -e .
 install_requirements = [
+    "black==24.8.0",
     "bumpversion",
-    "ccxt==4.1.59",
+    "ccxt==4.3.73",
     "coverage",
+    "dash[testing]==2.17.1",
+    "dash_bootstrap_components==1.6.0",
+    "dateparser==1.2.0",
+    "duckdb==1.0.0",
     "enforce_typing",
     "eth-account==0.11.0",
-    "eth-keys==0.5.0",
-    "flask==3.0.2",
-    "freezegun==1.4.0",
+    "eth-keys==0.5.1",
+    "eth-typing==4.4.0",
+    "flask==3.0.3",
     "imblearn",
-    "matplotlib==3.7.5",
-    "mypy==1.8.0",
-    "numpy==1.26.4",
-    "pandas==2.2.1",
+    "kaleido==0.2.1",
+    "mypy==1.11.0",
+    "numpy==2.0.1",
+    "pandas==2.2.2",
     "pathlib",
-    "polars==0.20.10",
+    "plotly==5.23.0",
+    "polars==1.4.1",
     "polars[timezone]",
-    "pyarrow==15.0.0",
-    "pylint==3.1.0",
+    "pyarrow==17.0.0",
+    "pylint==3.2.6",
     "pytest",
-    "pytest-asyncio==0.23.5",
+    "pytest-asyncio==0.21.1",
     "pytest-env",
     "pyyaml",
-    "requests==2.31.0",
-    "requests-mock==1.11.0",
-    "scikit-learn==1.4.1.post1",
-    "statsmodels==0.14.1",
-    "types-pyYAML==6.0.12.12",
-    "types-requests==2.31.0.20240218",
-    "web3==6.15.1",
-    "sapphire.py==0.2.2",
-    "ocean-contracts==2.0.0a14",  # install this last
+    "requests==2.32.3",
+    "requests-mock==1.12.1",
+    "scikit-learn==1.5.1",
+    "statsmodels==0.14.2",
+    "time_machine==2.14.2",
+    "typeguard==4.3.0",
+    "xgboost==2.1.1",
+    "dash_bootstrap_components==1.6.0",
+    "web3==6.20.1",
+    "sapphire.py==0.2.3",
+    "stopit==1.1.2",
+    "ocean-contracts==2.0.4",  # install this last
 ]
 
 # Required to run setup.py:

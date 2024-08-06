@@ -1,70 +1,62 @@
-import re
-
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 from enforce_typing import enforce_types
-import numpy as np
 import pytest
 
-from pdr_backend.cli.arg_feed import ArgFeed
-from pdr_backend.cli.arg_feeds import ArgFeeds
 from pdr_backend.ppss.aimodel_ss import (
-    APPROACH_OPTIONS,
-    WEIGHT_RECENT_OPTIONS,
-    BALANCE_CLASSES_OPTIONS,
-    CALIBRATE_PROBS_OPTIONS,
     AimodelSS,
     aimodel_ss_test_dict,
+    APPROACH_OPTIONS,
+    CALIBRATE_PROBS_OPTIONS,
+    CALIBRATE_REGR_OPTIONS,
+    BALANCE_CLASSES_OPTIONS,
+    REGR_APPROACH_OPTIONS,
+    WEIGHT_RECENT_OPTIONS,
 )
 
 
 @enforce_types
-def test_aimodel_ss_default_values():
+def test_aimodel_ss__default_values():
     d = aimodel_ss_test_dict()
     ss = AimodelSS(d)
 
-    assert ss.feeds_strs == ["binance BTC/USDT c"]
-    assert ss.feeds == ArgFeeds([ArgFeed("binance", "close", "BTC/USDT")])
-
-    assert ss.max_n_train == d["max_n_train"] == 7
-    assert ss.autoregressive_n == d["autoregressive_n"] == 3
-
-    assert ss.approach == d["approach"] == "LinearLogistic"
+    assert ss.approach == d["approach"] == "ClassifLinearRidge"
     assert ss.weight_recent == d["weight_recent"] == "10x_5x"
+    assert ss.weight_recent_n == (10, 5)
     assert ss.balance_classes == d["balance_classes"] == "SMOTE"
-    assert ss.calibrate_probs == d["calibrate_probs"] == "CalibratedClassifierCV_5x"
+    assert (
+        ss.calibrate_probs == d["calibrate_probs"] == "CalibratedClassifierCV_Sigmoid"
+    )
+    assert ss.calibrate_regr == d["calibrate_regr"] == "None"
+    assert ss.train_every_n_epochs == d["train_every_n_epochs"] == 1
 
     # str
     assert "AimodelSS" in str(ss)
     assert "approach" in str(ss)
+    assert not ss.do_regr
 
 
 @enforce_types
-def test_aimodel_ss_nondefault_values():
-    input_feeds = ["kraken ETH/USDT hc", "binance ETH/USDT TRX/DAI h"]
-    d = aimodel_ss_test_dict(input_feeds=input_feeds)
+def test_aimodel_ss__nondefault_values():
+    d = aimodel_ss_test_dict()
     ss = AimodelSS(d)
-    assert ss.feeds_strs == input_feeds
-    assert ss.feeds == ArgFeeds(
-        [
-            ArgFeed("kraken", "high", "ETH/USDT"),
-            ArgFeed("kraken", "close", "ETH/USDT"),
-            ArgFeed("binance", "high", "ETH/USDT"),
-            ArgFeed("binance", "high", "TRX/DAI"),
-        ]
-    )
-
-    ss = AimodelSS(aimodel_ss_test_dict(max_n_train=39))
-    assert ss.max_n_train == 39
-
-    ss = AimodelSS(aimodel_ss_test_dict(autoregressive_n=13))
-    assert ss.autoregressive_n == 13
 
     for approach in APPROACH_OPTIONS:
         ss = AimodelSS(aimodel_ss_test_dict(approach=approach))
         assert ss.approach == approach and approach in str(ss)
 
+        do_regr = approach in REGR_APPROACH_OPTIONS
+        assert ss.do_regr == do_regr
+
     for weight_recent in WEIGHT_RECENT_OPTIONS:
         ss = AimodelSS(aimodel_ss_test_dict(weight_recent=weight_recent))
         assert ss.weight_recent == weight_recent and weight_recent in str(ss)
+        if ss.weight_recent == "10x_5x":
+            assert ss.weight_recent_n == (10, 5)
+        if ss.weight_recent == "10000x":
+            assert ss.weight_recent_n == (10000, 0)
 
     for balance_classes in BALANCE_CLASSES_OPTIONS:
         ss = AimodelSS(aimodel_ss_test_dict(balance_classes=balance_classes))
@@ -74,30 +66,16 @@ def test_aimodel_ss_nondefault_values():
         ss = AimodelSS(aimodel_ss_test_dict(calibrate_probs=calibrate_probs))
         assert ss.calibrate_probs == calibrate_probs and calibrate_probs in str(ss)
 
+    for calibrate_regr in CALIBRATE_REGR_OPTIONS:
+        ss = AimodelSS(aimodel_ss_test_dict(calibrate_regr=calibrate_regr))
+        assert ss.calibrate_regr == calibrate_regr and calibrate_regr in str(ss)
+
+    ss = AimodelSS(aimodel_ss_test_dict(train_every_n_epochs=44))
+    assert ss.train_every_n_epochs == 44
+
 
 @enforce_types
-def test_aimodel_ss_unhappy_inputs():
-    input_feeds = ["kraken ETH/USDT"]  # missing eg "c"
-    d = aimodel_ss_test_dict(input_feeds)
-    with pytest.raises(
-        AssertionError, match=re.escape("Missing attributes ['signal'] for some feeds")
-    ):
-        AimodelSS(d)
-
-    with pytest.raises(ValueError):
-        AimodelSS(aimodel_ss_test_dict(max_n_train=0))
-
-    with pytest.raises(TypeError):
-        AimodelSS(aimodel_ss_test_dict(max_n_train=3.1))
-
-    with pytest.raises(ValueError):
-        AimodelSS(aimodel_ss_test_dict(autoregressive_n=0))
-
-    with pytest.raises(TypeError):
-        AimodelSS(aimodel_ss_test_dict(autoregressive_n=3.1))
-
-    with pytest.raises(TypeError):
-        AimodelSS(aimodel_ss_test_dict(autoregressive_n=np.inf))
+def test_aimodel_ss__bad_inputs():
 
     with pytest.raises(ValueError):
         AimodelSS(aimodel_ss_test_dict(approach="foo"))
@@ -110,3 +88,39 @@ def test_aimodel_ss_unhappy_inputs():
 
     with pytest.raises(ValueError):
         AimodelSS(aimodel_ss_test_dict(calibrate_probs="foo"))
+
+    with pytest.raises(ValueError):
+        AimodelSS(aimodel_ss_test_dict(calibrate_regr="foo"))
+
+    with pytest.raises(ValueError):
+        AimodelSS(aimodel_ss_test_dict(train_every_n_epochs=0))
+
+    with pytest.raises(ValueError):
+        AimodelSS(aimodel_ss_test_dict(train_every_n_epochs=-5))
+
+
+@enforce_types
+def test_aimodel_ss__calibrate_probs_skmethod():
+    d = aimodel_ss_test_dict(calibrate_probs="CalibratedClassifierCV_Sigmoid")
+    ss = AimodelSS(d)
+    assert ss.calibrate_probs_skmethod(100) == "sigmoid"
+    assert ss.calibrate_probs_skmethod(1000) == "sigmoid"
+
+    d = aimodel_ss_test_dict(calibrate_probs="CalibratedClassifierCV_Isotonic")
+    ss = AimodelSS(d)
+    assert ss.calibrate_probs_skmethod(100) == "sigmoid"  # because N is small
+    assert ss.calibrate_probs_skmethod(1000) == "isotonic"
+
+
+@enforce_types
+def test_aimodel_ss__setters():
+    d = aimodel_ss_test_dict()
+    ss = AimodelSS(d)
+
+    # train_every_n_epochs
+    ss.set_train_every_n_epochs(77)
+    assert ss.train_every_n_epochs == 77
+    with pytest.raises(ValueError):
+        ss.set_train_every_n_epochs(0)
+    with pytest.raises(ValueError):
+        ss.set_train_every_n_epochs(-5)

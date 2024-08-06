@@ -1,3 +1,7 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 import logging
 import time
 from typing import List, Optional
@@ -5,8 +9,9 @@ from typing import List, Optional
 from pdr_backend.cli.arg_feeds import ArgFeeds
 from pdr_backend.contract.slot import Slot
 from pdr_backend.subgraph.core_subgraph import query_subgraph
-from pdr_backend.subgraph.info725 import info725_to_info
+from pdr_backend.subgraph.info725 import get_pair_timeframe_source_from_contract
 from pdr_backend.subgraph.subgraph_feed import SubgraphFeed
+from pdr_backend.util.constants import WHITELIST_FEEDS_MAINNET
 from pdr_backend.util.time_types import UnixTimeS
 
 logger = logging.getLogger("subgraph")
@@ -82,19 +87,21 @@ def get_pending_slots(
                     continue
 
                 contract = slot["predictContract"]
-                info725 = contract["token"]["nft"]["nftData"]
-                info = info725_to_info(info725)
+                pair, timeframe, source = get_pair_timeframe_source_from_contract(
+                    contract
+                )
 
-                pair = info["pair"]
-                timeframe = info["timeframe"]
-                source = info["source"]
                 assert pair, "need a pair"
                 assert timeframe, "need a timeframe"
                 assert source, "need a source"
 
-                owner_id = contract["token"]["nft"]["owner"]["id"]
-                if owners and (owner_id not in owners):
-                    continue
+                if not contract["token"]["nft"]:
+                    if not contract["id"] in WHITELIST_FEEDS_MAINNET:
+                        continue
+                else:
+                    owner_id = contract["token"]["nft"]["owner"]["id"]
+                    if owners and (owner_id not in owners):
+                        continue
 
                 if allowed_feeds and not allowed_feeds.contains_combination(
                     source, pair, timeframe

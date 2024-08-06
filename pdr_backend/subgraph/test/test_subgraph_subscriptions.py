@@ -1,3 +1,7 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 from typing import Dict
 from unittest.mock import patch
 
@@ -13,7 +17,7 @@ from pdr_backend.util.time_types import UnixTimeS
 SAMPLE_PREDICTION = Subscription(
     # pylint: disable=line-too-long
     ID="0x18f54cc21b7a2fdd011bea06bba7801b280e3151-0x00d1e4950e0de743fe88956f02f44b16d22a1827f8c29ff561b69716dbcc2677-14",
-    pair="ADA/USDT",
+    pair="ADA-USDT",
     timeframe="5m",
     source="binance",
     timestamp=UnixTimeS(1701129777),
@@ -32,7 +36,7 @@ MOCK_SUBSCRIPTIONS_RESPONSE_FIRST_CALL = {
                     "id": "0x18f54cc21b7a2fdd011bea06bba7801b280e3151",
                     "token": {
                         "id": "0x18f54cc21b7a2fdd011bea06bba7801b280e3151",
-                        "name": "ADA/USDT",
+                        "name": "ADA-USDT",
                         "nft": {
                             "nftData": [
                                 {

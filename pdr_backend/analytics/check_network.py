@@ -1,3 +1,7 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 import logging
 import math
 from typing import Union
@@ -10,8 +14,9 @@ from pdr_backend.subgraph.core_subgraph import query_subgraph
 from pdr_backend.subgraph.subgraph_consume_so_far import get_consume_so_far_per_contract
 from pdr_backend.util.constants import S_PER_DAY, S_PER_WEEK
 from pdr_backend.util.constants_opf_addrs import get_opf_addresses
-from pdr_backend.util.currency_types import Eth
+from pdr_backend.util.currency_types import Eth, Wei
 from pdr_backend.util.time_types import UnixTimeS
+from pdr_backend.subgraph.subgraph_sync import block_number_is_synced
 
 _N_FEEDS = 20  # magic number alert. FIX ME, shouldn't be hardcoded
 logger = logging.getLogger("check_network")
@@ -47,10 +52,10 @@ def check_dfbuyer(
     dfbuyer_addr: str,
     contract_query_result: dict,
     subgraph_url: str,
-    token_amt: int,
+    token_amt: float,
 ):
     cur_ut = UnixTimeS.now()
-    start_ut = int((cur_ut // S_PER_WEEK) * S_PER_WEEK)
+    start_ut = UnixTimeS(int((cur_ut // S_PER_WEEK) * S_PER_WEEK - 3 * 60 * 60))
 
     contracts_sg_dict = contract_query_result["data"]["predictContracts"]
     contract_addresses = [
@@ -76,7 +81,22 @@ def check_dfbuyer(
 
 
 @enforce_types
-def get_expected_consume(for_ut: int, token_amt: int) -> Union[float, int]:
+def check_subgraph(web3_pp):
+    current_block = web3_pp.w3.eth.block_number
+    threshold = 50
+    check_block_number = current_block - threshold
+
+    is_synced = block_number_is_synced(web3_pp.subgraph_url, check_block_number)
+    if not is_synced:
+        logger.error(
+            "Subgraph is out of sync, checked block %d, current block: %d",
+            check_block_number,
+            current_block,
+        )
+
+
+@enforce_types
+def get_expected_consume(for_ut: int, token_amt: float) -> Union[float, int]:
     """
     @arguments
       for_ut -- unix time, in ms, in UTC time zone
@@ -89,7 +109,7 @@ def get_expected_consume(for_ut: int, token_amt: int) -> Union[float, int]:
     week_start_ut = (math.floor(for_ut / S_PER_WEEK)) * S_PER_WEEK
     time_passed = for_ut - week_start_ut
     n_weeks = int(time_passed / S_PER_DAY) + 1
-    return n_weeks * amt_per_feed_per_week
+    return int(n_weeks * amt_per_feed_per_week)
 
 
 @enforce_types
@@ -109,7 +129,7 @@ def do_query_network(subgraph_url: str, lookback_hours: int):
                         }
                         expireTime
                     }
-                    slots(where:{slot_lt:%s, slot_gt:%s} orderBy: slot orderDirection:desc first:1000){
+                    slots(where:{slot_lt:%s, slot_gt:%s} orderBy: slot orderDirection:desc first:900){
                         slot
                         roundSumStakesUp
                         roundSumStakes
@@ -168,7 +188,7 @@ def check_network_main(ppss: PPSS, lookback_hours: int):
     addresses = get_opf_addresses(web3_pp.network)
     for name, address in addresses.items():
         ocean_bal = OCEAN.balanceOf(address)
-        native_bal = web3_pp.get_token_balance(address)
+        native_bal = Wei(web3_pp.get_token_balance(address))
 
         ocean_warning = (
             " LOW OCEAN BALANCE!"
@@ -177,7 +197,7 @@ def check_network_main(ppss: PPSS, lookback_hours: int):
         )
         native_warning = " LOW NATIVE BALANCE!" if native_bal < Eth(10).to_wei() else ""
 
-        lfunc = logger.warning if ocean_warning or native_warning else logger.info
+        lfunc = logger.error if ocean_warning or native_warning else logger.info
 
         lfunc(
             "%s: OCEAN: %.2f%s, Native: %.2f%s",
@@ -191,9 +211,8 @@ def check_network_main(ppss: PPSS, lookback_hours: int):
     # ---------------- dfbuyer ----------------
 
     dfbuyer_addr = addresses["dfbuyer"].lower()
-    # 37500 * 1.201 = rewards + fees = total consume
-    token_amt = 37500 * 1.201
-    # If token_amt is not a multiple of 60, adjust it to the next multiple of 60
-    if token_amt % 60 != 0:
-        token_amt = ((token_amt // 60) + 1) * 60
+    token_amt = 44940.0
+
     check_dfbuyer(dfbuyer_addr, result, web3_pp.subgraph_url, token_amt)
+
+    check_subgraph(web3_pp)

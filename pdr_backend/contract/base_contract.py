@@ -1,3 +1,7 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 from abc import ABC
 
 from enforce_typing import enforce_types
@@ -45,7 +49,7 @@ class BaseContract(ABC):
         receiver = self.contract_instance.address if receiver is None else receiver
         pk = self.config.account.key.hex()[2:] if pk is None else pk
 
-        data = self.contract_instance.encodeABI(fn_name=function_name, args=args)
+        data = self.contract_instance.encode_abi(fn_name=function_name, args=args)
         rpc_url = self.config.rpc_url
 
         return wrapper.send_encrypted_sapphire_tx(

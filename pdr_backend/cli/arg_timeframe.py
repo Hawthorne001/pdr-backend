@@ -1,3 +1,7 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 from typing import List, Union
 
 from enforce_typing import enforce_types
@@ -19,20 +23,26 @@ class ArgTimeframe:
     @property
     def ms(self) -> int:
         """Returns timeframe, in ms"""
-        return self.m * 60 * 1000
+        return int(self.m * 60 * 1000)
 
     @property
     def s(self) -> int:
         """Returns timeframe, in s"""
-        return self.m * 60
+        return int(self.m * 60)
 
     @property
-    def m(self) -> int:
+    def m(self) -> float:
         """Returns timeframe, in minutes"""
+        if self.timeframe_str == "1s":
+            return 1 / 60
+        if self.timeframe_str == "30s":
+            return 1 / 2
         if self.timeframe_str == "1m":
             return 1
         if self.timeframe_str == "5m":
             return 5
+        if self.timeframe_str == "15m":
+            return 15
         if self.timeframe_str == "1h":
             return 60
         raise ValueError(f"need to support timeframe={self.timeframe_str}")
@@ -44,6 +54,7 @@ class ArgTimeframe:
         return self.timeframe_str
 
 
+# don't use @enforce_types, causes problems
 class ArgTimeframes(List[ArgTimeframe]):
     def __init__(self, timeframes: Union[List[str], List[ArgTimeframe]]):
         if not isinstance(timeframes, list):
@@ -51,9 +62,7 @@ class ArgTimeframes(List[ArgTimeframe]):
 
         frames = []
         for timeframe in timeframes:
-            if isinstance(timeframe, str):
-                frame = ArgTimeframe(timeframe)
-
+            frame = ArgTimeframe(timeframe) if isinstance(timeframe, str) else timeframe
             frames.append(frame)
 
         super().__init__(frames)
@@ -86,16 +95,22 @@ def s_to_timeframe_str(seconds: int) -> str:
 
 
 @enforce_types
-def verify_timeframes_str(signal_str: str):
-    """
-    @description
-      Raise an error if signal is invalid.
+def verify_timeframe_str(timeframe_str: str):
+    """Raise an error if input string is invalid."""
+    _ = ArgTimeframe(timeframe_str)
 
-    @argument
-      signal_str -- e.g. "close"
-    """
+
+@enforce_types
+def verify_timeframes_str(timeframes_str: str):
+    """Raise an error if input string is invalid."""
+    _ = ArgTimeframes.from_str(timeframes_str)
+
+
+@enforce_types
+def timeframes_str_ok(timeframes_str: str) -> bool:
+    """Return True if input string is valid"""
     try:
-        ArgTimeframes.from_str(signal_str)
+        ArgTimeframes.from_str(timeframes_str)
         return True
     except ValueError:
         return False

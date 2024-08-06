@@ -1,3 +1,7 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 import logging
 from typing import Dict, List
 
@@ -21,7 +25,7 @@ def query_pending_payouts(subgraph_url: str, addr: str) -> Dict[str, List[UnixTi
         query = """
         {
                 predictPredictions(
-                    where: {user: "%s", payout: null, slot_: {status: "Paying"} }, first: %s, skip: %s
+                    where: {user: "%s", payout: null, slot_: {status_in: ["Paying", "Canceled"]} }, first: %s, skip: %s
                 ) {
                     id
                     timestamp

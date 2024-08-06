@@ -1,3 +1,7 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 import pytest
 
 from pdr_backend.cli.cli_arguments import (
@@ -35,9 +39,11 @@ def test_print_args(caplog):
     parser = SimArgParser
     args = ["sim", "ppss.yaml"]
     parsed_args = parser.parse_args(args)
+    nested_args = {"foo": "bar"}
 
-    print_args(parsed_args)
+    print_args(parsed_args, nested_args)
 
     assert "pdr sim: Begin" in caplog.text
     assert "Arguments:" in caplog.text
     assert "PPSS_FILE=ppss.yaml" in caplog.text
+    assert "foo" in caplog.text

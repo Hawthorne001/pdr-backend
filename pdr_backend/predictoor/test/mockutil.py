@@ -1,3 +1,7 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 import os
 from typing import List
 from unittest.mock import Mock
@@ -20,7 +24,7 @@ INIT_BLOCK_NUMBER = 13
 
 
 @enforce_types
-def mock_ppss_1feed(approach: int, tmpdir: str, monkeypatch):
+def mock_ppss_1feed(approach: int, tmpdir: str, monkeypatch, pred_submitter_mgr=None):
     """
     @description
       Initialize the agent, and return it along with related info
@@ -29,13 +33,18 @@ def mock_ppss_1feed(approach: int, tmpdir: str, monkeypatch):
     @return
       feed -- SubgraphFeed, eg for binance BTC/USDT 5m
       ppss -- PPSS
-      pdr_contract -- PredictoorContract corresponding to the feed
+      pdr_contract -- FeedContract corresponding to the feed
     """
     # mock ppss, feed
     monkeypatch.setenv("PRIVATE_KEY", PRIV_KEY)
     monkeypatch.setenv("PRIVATE_KEY2", PRIV_KEY2)
     feed, ppss = mock_feed_ppss(
-        "5m", "binanceus", "BTC/USDT", network="development", tmpdir=tmpdir
+        "5m",
+        "binanceus",
+        "BTC/USDT",
+        network="development",
+        tmpdir=tmpdir,
+        pred_submitter_mgr=pred_submitter_mgr,
     )
     ppss.predictoor_ss.set_approach(approach)
 
@@ -47,7 +56,7 @@ def mock_ppss_1feed(approach: int, tmpdir: str, monkeypatch):
         ppss.web3_pp,
         INIT_TIMESTAMP,
         INIT_BLOCK_NUMBER,
-        ppss.predictoor_ss.timeframe_s,
+        feed.seconds_per_epoch,
         feed.address,
         monkeypatch,
     )
@@ -56,7 +65,7 @@ def mock_ppss_1feed(approach: int, tmpdir: str, monkeypatch):
 
 
 @enforce_types
-def mock_ppss_2feeds(approach: int, tmpdir: str, monkeypatch):
+def mock_ppss_2feeds(approach: int, tmpdir: str, monkeypatch, pred_submitter_mgr=None):
     """
     @description
       Initialize the agent, and return it along with related info
@@ -76,9 +85,16 @@ def mock_ppss_2feeds(approach: int, tmpdir: str, monkeypatch):
         mock_feed(timescale, exchange, f"{c}/{quote}") for c in coins
     ]
     ppss = mock_ppss(
-        [f"{exchange} {c}/{quote} c {timescale}" for c in coins],
+        [
+            {
+                "predict": f"{exchange} {c}/{quote} c {timescale}",
+                "train_on": [f"{exchange} {c}/{quote} c {timescale}" for c in coins],
+            }
+            for c in coins
+        ],
         network="development",
         tmpdir=tmpdir,
+        pred_submitter_mgr=pred_submitter_mgr,
     )
     ppss.predictoor_ss.set_approach(approach)
 
@@ -98,7 +114,7 @@ def mock_ppss_2feeds(approach: int, tmpdir: str, monkeypatch):
     contract_func = Mock()
     contract_func.return_value = pdr_contract
     monkeypatch.setattr(
-        "pdr_backend.contract.predictoor_contract.PredictoorContract",
+        "pdr_backend.contract.feed_contract.FeedContract",
         contract_func,
     )
 

@@ -1,15 +1,17 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 from unittest.mock import patch
-import pytest
 
 import polars as pl
+import pytest
 from enforce_typing import enforce_types
 
-from pdr_backend.lake.table import Table
 from pdr_backend.analytics.get_predictions_info import get_traction_info_main
+from pdr_backend.lake.prediction import Prediction
+from pdr_backend.lake.table import Table
 from pdr_backend.ppss.ppss import mock_ppss
-from pdr_backend.lake.table_pdr_predictions import predictions_schema
-
-table_name = "pdr_predictions"
 
 
 @enforce_types
@@ -18,9 +20,7 @@ table_name = "pdr_predictions"
 @patch("pdr_backend.analytics.get_predictions_info.plot_traction_daily_statistics")
 @patch("pdr_backend.analytics.get_predictions_info.get_slot_statistics")
 @patch("pdr_backend.analytics.get_predictions_info.plot_slot_daily_statistics")
-@patch("pdr_backend.analytics.get_predictions_info.GQLDataFactory.get_gql_tables")
 def test_get_traction_info_main_mainnet(
-    mock_get_gql_tables,
     mock_plot_slot_daily_statistics,
     mock_get_slot_statistics,
     mock_plot_traction_daily_statistics,
@@ -32,7 +32,7 @@ def test_get_traction_info_main_mainnet(
     st_timestr = "2023-11-02"
     fin_timestr = "2023-11-07"
     ppss = mock_ppss(
-        ["binance BTC/USDT c 5m"],
+        [{"predict": "binance BTC/USDT c 5m", "train_on": "binance BTC/USDT c 5m"}],
         "sapphire-mainnet",
         str(tmpdir),
         st_timestr=st_timestr,
@@ -40,9 +40,9 @@ def test_get_traction_info_main_mainnet(
     )
 
     predictions_df = _gql_datafactory_daily_predictions_df
-    predictions_table = Table(table_name, predictions_df.schema, ppss)
-    predictions_table.df = predictions_df
-    mock_get_gql_tables.return_value = {"pdr_predictions": predictions_table}
+    predictions_table = Table.from_dataclass(Prediction)
+    predictions_table.append_to_storage(predictions_df, ppss)
+
     get_traction_info_main(ppss, st_timestr, fin_timestr)
 
     assert len(predictions_df) > 0
@@ -67,24 +67,23 @@ def test_get_traction_info_main_mainnet(
 
 
 @enforce_types
-@patch("pdr_backend.analytics.get_predictions_info.GQLDataFactory.get_gql_tables")
-def test_get_traction_info_empty_data_factory(
-    mock_predictions_df,
+def test_get_traction_info_empty_data(
     tmpdir,
 ):
     st_timestr = "2023-11-02"
     fin_timestr = "2023-11-05"
     ppss = mock_ppss(
-        ["binance BTC/USDT c 5m"],
+        [{"predict": "binance BTC/USDT c 5m", "train_on": "binance BTC/USDT c 5m"}],
         "sapphire-mainnet",
         str(tmpdir),
         st_timestr=st_timestr,
         fin_timestr=fin_timestr,
     )
 
-    mock_predictions_df.return_value = {
-        "pdr_predictions": Table(table_name, predictions_schema, ppss)
-    }
+    pdr_prediction_table = Table.from_dataclass(Prediction)
+    pdr_prediction_table.append_to_storage(
+        pl.DataFrame([], schema=Prediction.get_lake_schema()), ppss
+    )
 
     with pytest.raises(AssertionError):
         get_traction_info_main(ppss, st_timestr, fin_timestr)

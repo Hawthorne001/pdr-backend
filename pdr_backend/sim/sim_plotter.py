@@ -1,20 +1,28 @@
-from typing import List
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
+import glob
+import os
+import pickle
+import time
+from datetime import datetime
+from pathlib import Path
 
 from enforce_typing import enforce_types
-from matplotlib import gridspec
-import matplotlib.pyplot as plt
 import numpy as np
-from numpy.random import random
-from statsmodels.stats.proportion import proportion_confint
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from pdr_backend.aimodel.aimodel_plotdata import AimodelPlotdata
-from pdr_backend.aimodel.aimodel_plotter import (
-    plot_aimodel_response,
-    plot_aimodel_varimps,
+
+from pdr_backend.statutil.autocorrelation_plotdata import (
+    AutocorrelationPlotdataFactory,
 )
-from pdr_backend.ppss.ppss import PPSS
-from pdr_backend.sim.sim_state import SimState
-from pdr_backend.util.constants import FONTSIZE
+from pdr_backend.statutil.autocorrelation_plotter import add_corr_traces
+from pdr_backend.statutil.dist_plotdata import DistPlotdataFactory
+from pdr_backend.statutil.dist_plotter import add_pdf, add_cdf, add_nq
 
 HEIGHT = 7.5
 WIDTH = int(HEIGHT * 3.2)
@@ -25,231 +33,482 @@ class SimPlotter:
     @enforce_types
     def __init__(
         self,
-        ppss: PPSS,
-        st: SimState,
     ):
-        # engine state, ss
-        self.st = st
-        self.ppss = ppss
+        self.st = None
+        self.aimodel_plotdata = None
+        self.multi_id = None
 
-        # so labels are above lines. Must be before figure()
-        plt.rcParams["axes.axisbelow"] = False
+    @staticmethod
+    def get_latest_run_id():
+        if not os.path.exists("sim_state"):
+            raise Exception(
+                "sim_state folder does not exist. Please run the simulation first."
+            )
+        path = sorted(Path("sim_state").iterdir(), key=os.path.getmtime)[-1]
+        return str(path).replace("sim_state/", "")
 
-        # figure, subplots
-        fig = plt.figure()
-        self.fig = fig
+    @staticmethod
+    def get_all_run_names():
+        path = Path("sim_state").iterdir()
+        return [str(p).replace("sim_state/", "") for p in path]
 
-        gs = gridspec.GridSpec(2, 6, width_ratios=[5, 1, 1, 0.6, 2, 3])
+    def load_state(self, multi_id):
+        root_path = f"sim_state/{multi_id}"
 
-        self.ax_pdr_profit_vs_time = fig.add_subplot(gs[0, 0])
-        self.ax_trader_profit_vs_time = fig.add_subplot(gs[1, 0])
+        if not os.path.exists("sim_state"):
+            raise Exception(
+                "sim_state folder does not exist. Please run the simulation first."
+            )
 
-        self.ax_accuracy_vs_time = fig.add_subplot(gs[0, 1:3])
-        self.ax_pdr_profit_vs_ptrue = fig.add_subplot(gs[1, 1])
-        self.ax_trader_profit_vs_ptrue = fig.add_subplot(gs[1, 2])
+        if not os.path.exists(root_path):
+            raise Exception(
+                f"sim_state/{multi_id} folder does not exist. Please run the simulation first."
+            )
 
-        # col 3 is empty, for overflow of aimodel_varimps's y-axis labels
-        self.ax_aimodel_varimps = fig.add_subplot(gs[:, 4])
+        all_state_files = glob.glob(f"{root_path}/st_*.pkl")
+        if not all_state_files:
+            raise Exception("No state files found. Please run the simulation first.")
 
-        self.ax_aimodel_response = fig.add_subplot(gs[:, 5])
+        if not os.path.exists(f"{root_path}/st_final.pkl"):
+            latest_st_file, latest_aimodel_file = _get_latest_usable_state(root_path)
+            with open(latest_st_file, "rb") as f:
+                self.st = pickle.load(f)
 
-        # attributes to help update plots' state quickly
-        self.N: int = 0
-        self.N_done: int = 0
-        self.x: List[float] = []
+            with open(latest_aimodel_file, "rb") as f:
+                self.aimodel_plotdata = pickle.load(f)
 
-        self.y01_est: List[float] = []
-        self.y01_l: List[float] = []
-        self.y01_u: List[float] = []
-        self.plotted_before: bool = False
+            return self.st, latest_st_file.replace(f"{root_path}/st_", "").replace(
+                ".pkl", ""
+            )
 
-        # push plot to screen
-        plt.ion()
-        plt.show()
+        # make sure the final state is written to disk before unpickling
+        # avoid race conditions with the pickling itself
+        if file_age_in_seconds(f"{root_path}/st_final.pkl") < 3:
+            time.sleep(3)
 
-    # pylint: disable=too-many-statements
-    @enforce_types
-    def make_plot(self, aimodel_plotdata: AimodelPlotdata):
-        """
-        @description
-          Create / update whole plot, with many subplots
-        """
-        # update N, N_done, x. **Update x only after updating N, N_done!**
-        self.N = len(self.st.pdr_profits_OCEAN)
-        self.N_done = len(self.x)  # what # points have been plotted previously
-        self.x = list(range(0, self.N))
+        with open(f"{root_path}/st_final.pkl", "rb") as f:
+            self.st = pickle.load(f)
 
-        # main work: create/update subplots
-        self._plot_pdr_profit_vs_time()
-        self._plot_trader_profit_vs_time()
+        with open(f"{root_path}/aimodel_plotdata_final.pkl", "rb") as f:
+            self.aimodel_plotdata = pickle.load(f)
 
-        self._plot_accuracy_vs_time()
-        self._plot_pdr_profit_vs_ptrue()
-        self._plot_trader_profit_vs_ptrue()
+        return self.st, "final"
 
-        self._plot_aimodel_varimps(aimodel_plotdata)
-        self._plot_aimodel_response(aimodel_plotdata)
+    def init_state(self, multi_id):
+        files = glob.glob("sim_state/{multi_id}/*")
 
-        # final pieces
-        self.fig.set_size_inches(WIDTH, HEIGHT)
-        self.fig.tight_layout(pad=0.5, h_pad=1.0, w_pad=1.0)
-        plt.subplots_adjust(wspace=0.3)
-        plt.pause(0.001)
-        self.plotted_before = True
+        self.multi_id = multi_id
 
-    @property
-    def next_x(self) -> List[float]:
-        return _slice(self.x, self.N_done, self.N)
+        for f in files:
+            os.remove(f)
 
-    @property
-    def next_hx(self) -> List[float]:
-        """horizontal x"""
-        return [self.next_x[0], self.next_x[-1]]
+        os.makedirs(f"sim_state/{multi_id}")
 
-    @enforce_types
-    def _plot_pdr_profit_vs_time(self):
-        ax = self.ax_pdr_profit_vs_time
-        y00 = list(np.cumsum(self.st.pdr_profits_OCEAN))
-        next_y00 = _slice(y00, self.N_done, self.N)
-        ax.plot(self.next_x, next_y00, c="g")
-        ax.plot(self.next_hx, [0, 0], c="0.2", ls="--", lw=1)
-        s = f"Predictoor profit vs time. Current:{y00[-1]:.2f} OCEAN"
-        _set_title(ax, s)
-        if not self.plotted_before:
-            ax.set_ylabel("predictoor profit (OCEAN)", fontsize=FONTSIZE)
-            ax.set_xlabel("time", fontsize=FONTSIZE)
-            _ylabel_on_right(ax)
-            ax.margins(0.005, 0.05)
+    def save_state(
+        self, sim_state, aimodel_plotdata: AimodelPlotdata, is_final: bool = False
+    ):
+        root_path = f"sim_state/{self.multi_id}"
+        ts = (
+            datetime.now().strftime("%Y%m%d_%H%M%S.%f")[:-3]
+            if not is_final
+            else "final"
+        )
 
-    @enforce_types
-    def _plot_trader_profit_vs_time(self):
-        ax = self.ax_trader_profit_vs_time
-        y10 = list(np.cumsum(self.st.trader_profits_USD))
-        next_y10 = _slice(y10, self.N_done, self.N)
-        ax.plot(self.next_x, next_y10, c="b")
-        ax.plot(self.next_hx, [0, 0], c="0.2", ls="--", lw=1)
-        _set_title(ax, f"Trader profit vs time. Current: ${y10[-1]:.2f}")
-        if not self.plotted_before:
-            ax.set_xlabel("time", fontsize=FONTSIZE)
-            ax.set_ylabel("trader profit (USD)", fontsize=FONTSIZE)
-            _ylabel_on_right(ax)
-            ax.margins(0.005, 0.05)
+        existing_states = sorted(
+            glob.glob(f"{root_path}/st_*.pkl"), key=os.path.getmtime
+        )
+        existing_aimodel_plotdata = sorted(
+            glob.glob(f"{root_path}/aimodel_plotdata_*.pkl"), key=os.path.getmtime
+        )
 
-    @enforce_types
-    def _plot_accuracy_vs_time(self):
-        ax = self.ax_accuracy_vs_time
-        for i in range(self.N_done, self.N):
-            n_correct = sum(self.st.corrects[: i + 1])
-            n_trials = len(self.st.corrects[: i + 1])
-            l, u = proportion_confint(count=n_correct, nobs=n_trials)
-            self.y01_est.append(n_correct / n_trials * 100)
-            self.y01_l.append(l * 100)
-            self.y01_u.append(u * 100)
-        next_y01_est = _slice(self.y01_est, self.N_done, self.N)
-        next_y01_l = _slice(self.y01_l, self.N_done, self.N)
-        next_y01_u = _slice(self.y01_u, self.N_done, self.N)
+        if existing_states and not is_final:
+            # remove old files, but if state is not final,
+            # keep next to last so that the runner knows the sim
+            # is running and not warming up
+            existing_states = existing_states[:-1]
+            existing_aimodel_plotdata = existing_aimodel_plotdata[:-1]
 
-        ax.plot(self.next_x, next_y01_est, "green")
-        ax.fill_between(self.next_x, next_y01_l, next_y01_u, color="0.9")
-        ax.plot(self.next_hx, [50, 50], c="0.2", ls="--", lw=1)
-        ax.set_ylim(bottom=40, top=60)
-        now_s = f"{self.y01_est[-1]:.2f}% "
-        now_s += f"[{self.y01_l[-1]:.2f}%, {self.y01_u[-1]:.2f}%]"
-        _set_title(ax, f"% correct vs time. Current: {now_s}")
-        if not self.plotted_before:
-            ax.set_xlabel("time", fontsize=FONTSIZE)
-            ax.set_ylabel("% correct", fontsize=FONTSIZE)
-            _ylabel_on_right(ax)
-            ax.margins(0.01, 0.01)
+        for fl in existing_states:
+            os.remove(fl)
+
+        for fl in existing_aimodel_plotdata:
+            os.remove(fl)
+
+        with open(f"{root_path}/st_{ts}.pkl", "wb") as f:
+            pickle.dump(sim_state, f)
+
+        with open(f"{root_path}/aimodel_plotdata_{ts}.pkl", "wb") as f:
+            pickle.dump(aimodel_plotdata, f)
 
     @enforce_types
-    def _plot_pdr_profit_vs_ptrue(self):
-        ax = self.ax_pdr_profit_vs_ptrue
-        stake_amt = self.ppss.predictoor_ss.stake_amount.amt_eth
-        mnp, mxp = -stake_amt, stake_amt
-        avg = np.average(self.st.pdr_profits_OCEAN)
-        next_profits = _slice(self.st.pdr_profits_OCEAN, self.N_done, self.N)
-        next_probs_up = _slice(self.st.probs_up, self.N_done, self.N)
-
-        c = (random(), random(), random())  # random RGB color
-        ax.scatter(next_probs_up, next_profits, color=c, s=1)
-
-        s = f"pdr profit dist. avg={avg:.2f} OCEAN"
-        _set_title(ax, s)
-        ax.plot([0.5, 0.5], [mnp, mxp], c="0.2", ls="-", lw=1)
-        if not self.plotted_before:
-            ax.plot([0.0, 1.0], [0, 0], c="0.2", ls="--", lw=1)
-            _set_xlabel(ax, "prob(up)")
-            _set_ylabel(ax, "pdr profit (OCEAN)")
-            _ylabel_on_right(ax)
-            ax.margins(0.05, 0.05)
+    def plot_pdr_profit_vs_time(self):
+        y = list(np.cumsum(self.st.pdr_profits_OCEAN))
+        ylabel = "predictoor profit (OCEAN)"
+        title = f"Predictoor profit vs time. Current: {y[-1]:.2f} OCEAN"
+        fig = make_subplots(rows=1, cols=1, subplot_titles=(title,))
+        self._add_subplot_y_vs_time(fig, y, ylabel, "lines", row=1, col=1)
+        return fig
 
     @enforce_types
-    def _plot_trader_profit_vs_ptrue(self):
-        ax = self.ax_trader_profit_vs_ptrue
-        mnp = min(self.st.trader_profits_USD)
-        mxp = max(self.st.trader_profits_USD)
-        avg = np.average(self.st.trader_profits_USD)
-        next_profits = _slice(self.st.trader_profits_USD, self.N_done, self.N)
-        next_probs_up = _slice(self.st.probs_up, self.N_done, self.N)
-
-        c = (random(), random(), random())  # random RGB color
-        ax.scatter(next_probs_up, next_profits, color=c, s=1)
-
-        s = f"trader profit dist. avg={avg:.2f} USD"
-
-        _set_title(ax, s)
-        ax.plot([0.5, 0.5], [mnp, mxp], c="0.2", ls="-", lw=1)
-        if not self.plotted_before:
-            ax.plot([0.0, 1.0], [0, 0], c="0.2", ls="--", lw=1)
-            _set_xlabel(ax, "prob(up)")
-            _set_ylabel(ax, "trader profit (USD)")
-            _ylabel_on_right(ax)
-            ax.margins(0.05, 0.05)
+    def plot_trader_profit_vs_time(self):
+        y = list(np.cumsum(self.st.trader_profits_USD))
+        ylabel = "trader profit (USD)"
+        title = f"Trader profit vs time. Current: ${y[-1]:.2f}"
+        fig = make_subplots(rows=1, cols=1, subplot_titles=(title,))
+        self._add_subplot_y_vs_time(fig, y, ylabel, "lines", row=1, col=1)
+        return fig
 
     @enforce_types
-    def _plot_aimodel_varimps(self, d: AimodelPlotdata):
-        ax = self.ax_aimodel_varimps
-        imps_tups = d.model.importance_per_var(include_stddev=True)
-        plot_aimodel_varimps(d.colnames, imps_tups, (self.fig, ax))
-        if not self.plotted_before:
-            ax.margins(0.01, 0.01)
+    def plot_pdr_profit_vs_ptrue(self):
+        x = self.st.probs_up
+        y = self.st.pdr_profits_OCEAN
+        fig = go.Figure(
+            go.Scatter(
+                x=x,
+                y=y,
+                mode="markers",
+                marker={"color": "#636EFA", "size": 2},
+            )
+        )
+        fig.add_hline(y=0, line_dash="dot", line_color="grey")
+        title = f"Predictoor profit dist. avg={np.average(y):.2f} OCEAN"
+        fig.update_layout(title=title)
+        fig.update_xaxes(title="prob(up)")
+        fig.update_yaxes(title="pdr profit (OCEAN)")
+
+        return fig
 
     @enforce_types
-    def _plot_aimodel_response(self, d: AimodelPlotdata):
-        ax = self.ax_aimodel_response
-        plot_aimodel_response(d, (self.fig, ax))
-        if not self.plotted_before:
-            ax.margins(0.01, 0.01)
+    def plot_trader_profit_vs_ptrue(self):
+        x = self.st.probs_up
+        y = self.st.trader_profits_USD
+        fig = go.Figure(
+            go.Scatter(
+                x=x,
+                y=y,
+                mode="markers",
+                marker={"color": "#636EFA", "size": 2},
+            )
+        )
+        fig.add_hline(y=0, line_dash="dot", line_color="grey")
+        title = f"trader profit dist. avg={np.average(y):.2f} USD"
+        fig.update_layout(title=title)
+        fig.update_xaxes(title="prob(up)")
+        fig.update_yaxes(title="trader profit (USD)")
+
+        return fig
+
+    @enforce_types
+    def plot_model_performance_vs_time(self):
+        # set titles
+        aim = self.st.aim
+        s1 = f"accuracy = {aim.acc_ests[-1]*100:.2f}% "
+        s1 += f"[{aim.acc_ls[-1]*100:.2f}%, {aim.acc_us[-1]*100:.2f}%]"
+
+        s2 = f"f1={aim.f1s[-1]:.4f}"
+        s2 += f" [recall={aim.recalls[-1]:.4f}"
+        s2 += f", precision={aim.precisions[-1]:.4f}]"
+
+        s3 = f"log loss = {aim.losses[-1]:.4f}"
+
+        # make subplots
+        fig = make_subplots(
+            rows=3,
+            cols=1,
+            subplot_titles=(s1, s2, s3),
+            vertical_spacing=0.08,
+        )
+
+        # fill in subplots
+        self._add_subplot_accuracy_vs_time(fig, row=1)
+        self._add_subplot_f1_precision_recall_vs_time(fig, row=2)
+        self._add_subplot_log_loss_vs_time(fig, row=3)
+
+        # global: set minor ticks
+        minor = {"ticks": "inside", "showgrid": True}
+        for row in [1, 2, 3]:
+            fig.update_yaxes(minor=minor, row=row, col=1)
+            fig.update_xaxes(minor=minor, row=row, col=1)
+
+        # global: share x-axes of subplots
+        fig.update_layout(
+            {
+                "xaxis": {"matches": "x", "showticklabels": True},
+                "xaxis2": {"matches": "x", "showticklabels": True},
+                "xaxis3": {"matches": "x", "showticklabels": True},
+            }
+        )
+        fig.update_xaxes(title="time", row=3, col=1)
+
+        # global: don't show legend
+        fig.update_layout(showlegend=False)
+
+        return fig
+
+    @enforce_types
+    def _add_subplot_accuracy_vs_time(self, fig, row):
+        aim = self.st.aim
+        acc_ests = [100 * a for a in aim.acc_ests]
+        df = pd.DataFrame(acc_ests, columns=["accuracy"])
+        df["acc_ls"] = [100 * a for a in aim.acc_ls]
+        df["acc_us"] = [100 * a for a in aim.acc_us]
+        df["time"] = range(len(aim.acc_ests))
+
+        fig.add_traces(
+            [
+                # line: lower bound
+                go.Scatter(
+                    x=df["time"],
+                    y=df["acc_us"],
+                    mode="lines",
+                    fill=None,
+                    name="accuracy upper bound",
+                    marker_color="#636EFA",
+                ),
+                # line: upper bound
+                go.Scatter(
+                    x=df["time"],
+                    y=df["acc_ls"],
+                    mode="lines",
+                    fill="tonexty",
+                    name="accuracy lower bound",
+                    marker_color="#636EFA",
+                ),
+                # line: estimated accuracy
+                go.Scatter(
+                    x=df["time"],
+                    y=df["accuracy"],
+                    mode="lines",
+                    name="accuracy",
+                    marker_color="#000000",
+                ),
+                # line: 50% horizontal
+                go.Scatter(
+                    x=[min(df["time"]), max(df["time"])],
+                    y=[50, 50],
+                    mode="lines",
+                    marker_color="grey",
+                ),
+            ],
+            rows=[row] * 4,
+            cols=[1] * 4,
+        )
+        fig.update_yaxes(title_text="accuracy (%)", row=1, col=1)
+
+    @enforce_types
+    def _add_subplot_f1_precision_recall_vs_time(self, fig, row):
+        aim = self.st.aim
+        df = pd.DataFrame(aim.f1s, columns=["f1"])
+        df["precisions"] = aim.precisions
+        df["recalls"] = aim.recalls
+        df["time"] = range(len(aim.f1s))
+
+        fig.add_traces(
+            [
+                # line: f1
+                go.Scatter(
+                    x=df["time"],
+                    y=df["f1"],
+                    mode="lines",
+                    name="f1",
+                    marker_color="#72B7B2",
+                ),
+                # line: precision
+                go.Scatter(
+                    x=df["time"],
+                    y=df["precisions"],
+                    mode="lines",
+                    name="precision",
+                    marker_color="#AB63FA",
+                ),
+                # line: recall
+                go.Scatter(
+                    x=df["time"],
+                    y=df["recalls"],
+                    mode="lines",
+                    name="recall",
+                    marker_color="#636EFA",
+                ),
+                # line: 0.5 horizontal
+                go.Scatter(
+                    x=[min(df["time"]), max(df["time"])],
+                    y=[0.5, 0.5],
+                    mode="lines",
+                    name="",
+                    marker_color="grey",
+                ),
+            ],
+            rows=[row] * 4,
+            cols=[1] * 4,
+        )
+        fig.update_yaxes(title_text="f1, etc", row=2, col=1)
+
+    @enforce_types
+    def _add_subplot_log_loss_vs_time(self, fig, row):
+        aim = self.st.aim
+        df = pd.DataFrame(aim.losses, columns=["log loss"])
+        df["time"] = range(len(aim.losses))
+
+        fig.add_trace(
+            go.Scatter(x=df["time"], y=df["log loss"], mode="lines", name="log loss"),
+            row=row,
+            col=1,
+        )
+        fig.update_yaxes(title_text="log loss", row=3, col=1)
+
+    @enforce_types
+    def plot_prediction_residuals_dist(self):
+        if _model_is_classif(self.st):
+            return empty_fig("(Nothing to show because model is a classifier.)")
+
+        # calc data
+        d = DistPlotdataFactory.build(self.st.aim.yerrs)
+
+        # initialize subplots
+        s1, s2, s3 = "Residuals distribution", "", ""
+        fig = make_subplots(
+            rows=3,
+            cols=1,
+            subplot_titles=(s1, s2, s3),
+            vertical_spacing=0.02,
+            shared_xaxes=True,
+        )
+
+        # fill in subplots
+        add_pdf(fig, d, row=1, col=1)
+        add_cdf(fig, d, row=2, col=1)
+        add_nq(fig, d, row=3, col=1)
+
+        # global: set minor ticks
+        minor = {"ticks": "inside", "showgrid": True}
+        fig.update_yaxes(minor=minor, row=1, col=1)
+        for row in [2, 3, 4, 5]:
+            fig.update_yaxes(minor=minor, row=row, col=1)
+            fig.update_xaxes(minor=minor, row=row, col=1)
+
+        return fig
+
+    @enforce_types
+    def plot_prediction_residuals_other(self):
+        if _model_is_classif(self.st):
+            return empty_fig()
+
+        # calc data
+        nlags = 10  # magic number alert # FIX ME: have spinner, like ARIMA feeds
+        d = AutocorrelationPlotdataFactory.build(self.st.aim.yerrs, nlags=nlags)
+
+        # initialize subplots
+        s1 = "Residuals vs time"
+        s2 = "Residuals correlogram"
+        fig = make_subplots(
+            rows=2,
+            cols=1,
+            subplot_titles=(s1, s2),
+            vertical_spacing=0.12,
+        )
+
+        # fill in subplots
+        self._add_subplot_residual_vs_time(fig, row=1, col=1)
+        add_corr_traces(
+            fig,
+            d.acf_results,
+            row=2,
+            col=1,
+            ylabel="autocorrelation (ACF)",
+        )
+
+        return fig
+
+    @enforce_types
+    def _add_subplot_residual_vs_time(self, fig, row, col):
+        y = self.st.aim.yerrs
+        self._add_subplot_y_vs_time(fig, y, "residual", "markers", row, col)
+
+    @enforce_types
+    def _add_subplot_y_vs_time(self, fig, y, ylabel, mode, row, col):
+        assert mode in ["markers", "lines"], mode
+        line, marker = None, None
+        if mode == "markers":
+            marker = {"color": "black", "size": 2}
+        elif mode == "lines":
+            line = {"color": "#636EFA"}
+
+        x = list(range(len(y)))
+
+        fig.add_traces(
+            [
+                # points: y vs time
+                go.Scatter(
+                    x=x,
+                    y=y,
+                    mode=mode,
+                    marker=marker,
+                    line=line,
+                    showlegend=False,
+                ),
+                # line: horizontal error = 0
+                go.Scatter(
+                    x=[min(x), max(x)],
+                    y=[0.0, 0.0],
+                    mode="lines",
+                    line={"color": "grey", "dash": "dot"},
+                    showlegend=False,
+                ),
+            ],
+            rows=[row] * 2,
+            cols=[col] * 2,
+        )
+        fig.update_xaxes(title="time", row=row, col=col)
+        fig.update_yaxes(title=ylabel, row=row, col=col)
+
+        return fig
 
 
 @enforce_types
-def _slice(a: list, N_done: int, N: int) -> list:
-    return [a[i] for i in range(max(0, N_done - 1), N)]
+def file_age_in_seconds(pathname):
+    stat_result = os.stat(pathname)
+    return time.time() - stat_result.st_mtime
 
 
 @enforce_types
-def _set_xlabel(ax, s: str):
-    ax.set_xlabel(s, fontsize=FONTSIZE)
+def _model_is_classif(sim_state) -> bool:
+    yerrs = sim_state.aim.yerrs
+    return min(yerrs) == max(yerrs) == 0.0
 
 
 @enforce_types
-def _set_ylabel(ax, s: str):
-    ax.set_ylabel(s, fontsize=FONTSIZE)
+def empty_fig(title=""):
+    fig = go.Figure()
+    w = "white"
+    fig.update_layout(title=title, paper_bgcolor=w, plot_bgcolor=w)
+    fig.update_xaxes(visible=False, showgrid=False, gridcolor=w, zerolinecolor=w)
+    fig.update_yaxes(visible=False, showgrid=False, gridcolor=w, zerolinecolor=w)
+    return fig
 
 
 @enforce_types
-def _set_title(ax, s: str):
-    ax.set_title(s, fontsize=FONTSIZE, fontweight="bold")
+def _get_latest_usable_state(root_path: str):
+    all_state_files = glob.glob(f"{root_path}/st_*.pkl")
+    all_state_files.sort()
+    latest_file = all_state_files[-1]
 
+    aimodel_filename = latest_file.replace("st_", "aimodel_plotdata_")
 
-@enforce_types
-def _ylabel_on_right(ax):
-    ax.yaxis.tick_right()
-    ax.yaxis.set_label_position("right")
+    if os.path.exists(aimodel_filename):
+        return latest_file, aimodel_filename
 
+    # if the process was interrupted on aimodel filename creation,
+    # the pair is invalid ==> use next to last state if exists
 
-@enforce_types
-def _del_lines(ax):
-    for l in ax.lines:
-        l.remove()
+    if len(all_state_files) < 1:
+        raise Exception("No valid state files found. Please run the simulation first.")
+
+    latest_file = all_state_files[-2]
+    aimodel_filename = latest_file.replace("st_", "aimodel_plotdata_")
+
+    if not os.path.exists(aimodel_filename):
+        raise Exception(
+            "No valid aimodel_plotdata file found. Please run the simulation again."
+        )
+
+    return latest_file, aimodel_filename

@@ -1,7 +1,16 @@
+#
+# Copyright 2024 Ocean Protocol Foundation
+# SPDX-License-Identifier: Apache-2.0
+#
 import argparse
 import ast
 
+from enforce_typing import enforce_types
 
+from pdr_backend.ppss.ppss import PPSS
+
+
+@enforce_types
 class NestedArgParser(argparse.ArgumentParser):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -16,6 +25,13 @@ class NestedArgParser(argparse.ArgumentParser):
                 key, eq, value = arg[2:].partition("=")
                 if eq:  # Only proceed if '=' is found
                     self._process_nested_arg(key, value)
+
+        if hasattr(namespace, "PPSS_FILE") and hasattr(namespace, "NETWORK"):
+            namespace.PPSS = PPSS(
+                yaml_filename=namespace.PPSS_FILE,
+                network=namespace.NETWORK,
+                nested_override_args=self.nested_args,
+            )
 
         return namespace, self.nested_args
 
@@ -43,3 +59,25 @@ class NestedArgParser(argparse.ArgumentParser):
                 return float(value)
             except ValueError:
                 return value
+
+
+@enforce_types
+def flat_to_nested_args(flat_args: dict) -> dict:
+    """
+    @description
+       Given a point, construct nested_args dict.
+       The nested_args can then be applied to the ppss construction dict.
+
+    @arguments
+       flat_args -- dict of [dot-separated-varname] : var_value
+
+    @return
+      nested_args - dict of dict of ...
+
+    @notes
+      Implemented by 'hacking' nested_arg_parser
+    """
+    args_list = [f"--{key}={val}" for key, val in flat_args.items()]
+    parser = NestedArgParser()
+    _, nested_args = parser.parse_known_args(args_list)
+    return nested_args
